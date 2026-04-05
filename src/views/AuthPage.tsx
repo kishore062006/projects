@@ -26,6 +26,7 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const endpoint = mode === 'login' ? 'login' : 'register';
+  const requestUrl = `${API_BASE}/api/auth/${endpoint}`;
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -38,6 +39,11 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
     setIsSubmitting(true);
 
     try {
+      if (!API_BASE && !import.meta.env.DEV) {
+        setError('API is not configured for production. Set VITE_API_BASE_URL in Vercel and redeploy.');
+        return;
+      }
+
       const payload: Record<string, string> = {
         email,
         password,
@@ -47,21 +53,27 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
         payload.name = name;
       }
 
-      const response = await fetch(`${API_BASE}/api/auth/${endpoint}`, {
+      const response = await fetch(requestUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
-      const data = await response.json();
+      const contentType = response.headers.get('content-type') || '';
+      const data = contentType.includes('application/json') ? await response.json() : null;
       if (!response.ok) {
-        setError(data?.message || 'Authentication failed.');
+        if (data && typeof data === 'object' && 'message' in data) {
+          setError(String((data as { message: unknown }).message));
+        } else {
+          setError(`Authentication failed (${response.status}). Check VITE_API_BASE_URL and backend deployment.`);
+        }
         return;
       }
 
       onAuthSuccess(data as AuthUser);
-    } catch (err) {
-      setError('Unable to connect to the authentication service.');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Network request failed';
+      setError(`Unable to connect to the authentication service. ${message}`);
     } finally {
       setIsSubmitting(false);
     }
