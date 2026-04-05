@@ -4,6 +4,10 @@ import { MapPin, AlertCircle, CheckCircle, Clock, Filter, CheckSquare, List } fr
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import * as L from 'leaflet';
 
+const API_BASE = (
+  import.meta.env.VITE_API_BASE_URL?.trim() || (import.meta.env.DEV ? 'http://localhost:4001' : '')
+).replace(/\/$/, '');
+
 // Fix for default Leaflet marker icons in React
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -33,24 +37,67 @@ export function AuthorityPortal() {
   const [viewMode, setViewMode] = useState<'table' | 'map'>('table');
 
   useEffect(() => {
-    const savedReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]');
-    setIssues(savedReports);
+    const loadIssues = async () => {
+      if (API_BASE) {
+        try {
+          const response = await fetch(`${API_BASE}/api/reports`);
+          if (response.ok) {
+            const data = await response.json();
+            if (Array.isArray(data)) {
+              setIssues(data);
+              localStorage.setItem('ecoSyncReports', JSON.stringify(data));
+              return;
+            }
+          }
+        } catch {
+          // Fall back to local data.
+        }
+      }
+
+      const savedReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]');
+      setIssues(savedReports);
+    };
+
+    void loadIssues();
   }, []);
 
-  const handleMarkResolved = (id: string) => {
-    const updatedIssues = issues.map(issue => 
-      issue.id === id ? { ...issue, status: 'Resolved' } : issue
-    );
-    setIssues(updatedIssues);
+  const handleMarkResolved = async (id: string) => {
+    let resolvedViaApi = false;
 
-    const savedReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]');
-    const updatedSavedReports = savedReports.map((report: any) => 
-      report.id === id ? { ...report, status: 'Resolved' } : report
-    );
-    localStorage.setItem('ecoSyncReports', JSON.stringify(updatedSavedReports));
+    if (API_BASE) {
+      try {
+        const response = await fetch(`${API_BASE}/api/reports/${id}/resolve`, {
+          method: 'PATCH',
+        });
 
-    const currentPoints = parseInt(localStorage.getItem('ecoPoints') || '0');
-    localStorage.setItem('ecoPoints', (currentPoints + 150).toString());
+        if (response.ok) {
+          const updatedReport = await response.json();
+          const nextIssues = issues.map((issue) => (issue.id === id ? updatedReport : issue));
+          setIssues(nextIssues);
+          localStorage.setItem('ecoSyncReports', JSON.stringify(nextIssues));
+          resolvedViaApi = true;
+        }
+      } catch {
+        // Fall back to local update.
+      }
+    }
+
+    if (!resolvedViaApi) {
+      const updatedIssues = issues.map((issue) =>
+        issue.id === id ? { ...issue, status: 'Resolved', time: 'Resolved' } : issue
+      );
+      setIssues(updatedIssues);
+
+      const savedReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]');
+      const updatedSavedReports = savedReports.map((report: any) =>
+        report.id === id ? { ...report, status: 'Resolved', time: 'Resolved' } : report
+      );
+      localStorage.setItem('ecoSyncReports', JSON.stringify(updatedSavedReports));
+
+      const currentPoints = parseInt(localStorage.getItem('ecoPoints') || '0');
+      localStorage.setItem('ecoPoints', (currentPoints + 150).toString());
+    }
+
     alert(`Ticket ${id} marked as Resolved! The reporter has been awarded 150 bonus Leaves.`);
   };
 

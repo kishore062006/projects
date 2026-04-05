@@ -20,6 +20,14 @@ const defaultGraphData = [
   { name: 'Sunday', carbon: 0 },
 ];
 
+type DashboardResponse = {
+  points: number;
+  resolvedCount: number;
+  pendingCount: number;
+  graphData: Array<{ name: string; carbon: number }>;
+  recentActions: Array<{ id: number; title: string; time: string; points: number | string; type: string }>;
+};
+
 interface CitizenDashboardProps {
   user: AuthUser | null;
 }
@@ -40,6 +48,18 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
   const [isWalkModalOpen, setIsWalkModalOpen] = useState(false);
   const [walkKm, setWalkKm] = useState('');
   const [walkDay, setWalkDay] = useState('Monday');
+
+  const normalizeGraphData = (incoming: Array<{ name: string; carbon: number }> | undefined) => {
+    if (!incoming || incoming.length === 0) {
+      return defaultGraphData;
+    }
+
+    const incomingMap = new Map(incoming.map((item) => [item.name, item.carbon]));
+    return defaultGraphData.map((day) => ({
+      name: day.name,
+      carbon: Number(incomingMap.get(day.name) ?? day.carbon),
+    }));
+  };
 
   useEffect(() => {
     const savedActions = JSON.parse(localStorage.getItem('ecoActions') || 'null');
@@ -62,7 +82,36 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
     setPendingCount(pending);
 
     const savedGraph = JSON.parse(localStorage.getItem('ecoGraphData') || 'null');
-    if (savedGraph) setGraphData(savedGraph);
+    if (savedGraph) setGraphData(normalizeGraphData(savedGraph));
+
+    const loadDashboard = async () => {
+      if (!API_BASE) return;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/dashboard`);
+        if (!response.ok) return;
+        const data = (await response.json()) as DashboardResponse;
+
+        setTotalPoints(Number(data.points || 0));
+        setResolvedCount(Number(data.resolvedCount || 0));
+        setPendingCount(Number(data.pendingCount || 0));
+        setGraphData(normalizeGraphData(data.graphData));
+
+        const normalizedActions = Array.isArray(data.recentActions)
+          ? data.recentActions.map((action) => ({
+              ...action,
+              points: typeof action.points === 'number' ? `+${action.points}` : action.points,
+            }))
+          : [];
+        setRecentActions(normalizedActions);
+
+        localStorage.setItem('ecoPoints', String(Number(data.points || 0)));
+        localStorage.setItem('ecoGraphData', JSON.stringify(normalizeGraphData(data.graphData)));
+        localStorage.setItem('ecoActions', JSON.stringify(normalizedActions));
+      } catch {
+        // Keep local fallback values.
+      }
+    };
 
     const loadMetrics = async () => {
       if (!user?.id || !API_BASE) return;
@@ -84,6 +133,7 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
       }
     };
 
+    void loadDashboard();
     void loadMetrics();
   }, [user]);
 
@@ -148,7 +198,22 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
       }
     };
 
+    const syncAction = async () => {
+      if (!API_BASE) return;
+
+      try {
+        await fetch(`${API_BASE}/api/actions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, points, type: categoryId }),
+        });
+      } catch {
+        // Local fallback already applied.
+      }
+    };
+
     void syncMetrics();
+    void syncAction();
   };
 
   const handleLogWalk = (e: React.FormEvent) => {
@@ -164,9 +229,24 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
 
     setGraphData([...updatedGraphData]);
     localStorage.setItem('ecoGraphData', JSON.stringify(updatedGraphData));
+
+    const syncGraph = async () => {
+      if (!API_BASE) return;
+
+      try {
+        await fetch(`${API_BASE}/api/graph`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ day: walkDay, carbon: carbonSaved }),
+        });
+      } catch {
+        // Local fallback already applied.
+      }
+    };
     
     const realisticCarbon = parseFloat((km * 0.2).toFixed(1));
     handleLogAction('carbon', `Walked ${km}km (Saved ${realisticCarbon}kg CO2)`, Math.floor(km * 5), km);
+    void syncGraph();
     
     setIsWalkModalOpen(false);
     setWalkKm('');

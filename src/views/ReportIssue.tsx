@@ -2,6 +2,10 @@ import { useState, useRef, useEffect } from 'react';
 import { Camera, MapPin, Upload, AlertTriangle, Cpu, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 
+const API_BASE = (
+  import.meta.env.VITE_API_BASE_URL?.trim() || (import.meta.env.DEV ? 'http://localhost:4001' : '')
+).replace(/\/$/, '');
+
 export function ReportIssue() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -139,31 +143,42 @@ export function ReportIssue() {
     };
 
     try {
-      const reportToStore = {
-        id: `TKT-${Math.floor(Math.random() * 10000)}`,
-        ...reportData,
-        status: 'Open',
-        time: 'Just now',
-        timestamp: new Date().toISOString(),
-        category,
-      };
+      let savedToBackend = false;
+      if (API_BASE) {
+        const response = await fetch(`${API_BASE}/api/reports`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(reportData),
+        });
+        savedToBackend = response.ok;
+      }
 
-      const existingReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]');
-      localStorage.setItem('ecoSyncReports', JSON.stringify([reportToStore, ...existingReports]));
+      if (!savedToBackend) {
+        const reportToStore = {
+          id: `TKT-${Math.floor(Math.random() * 10000)}`,
+          ...reportData,
+          status: 'Open',
+          time: 'Just now',
+          timestamp: new Date().toISOString(),
+          category,
+        };
 
-      const newAction = {
-        id: Date.now(),
-        title: `Reported ${reportToStore.type}`,
-        time: 'Just now',
-        points: '+50',
-        type: 'report'
-      };
-      const existingActions = JSON.parse(localStorage.getItem('ecoActions') || '[]');
-      localStorage.setItem('ecoActions', JSON.stringify([newAction, ...existingActions]));
+        const existingReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]');
+        localStorage.setItem('ecoSyncReports', JSON.stringify([reportToStore, ...existingReports]));
 
-      const currentPoints = parseInt(localStorage.getItem('ecoPoints') || '0');
-      localStorage.setItem('ecoPoints', (currentPoints + 50).toString());
+        const newAction = {
+          id: Date.now(),
+          title: `Reported ${reportToStore.type}`,
+          time: 'Just now',
+          points: '+50',
+          type: 'report'
+        };
+        const existingActions = JSON.parse(localStorage.getItem('ecoActions') || '[]');
+        localStorage.setItem('ecoActions', JSON.stringify([newAction, ...existingActions]));
 
+        const currentPoints = parseInt(localStorage.getItem('ecoPoints') || '0');
+        localStorage.setItem('ecoPoints', (currentPoints + 50).toString());
+      }
     } catch (error) {
       console.error("Failed to save report", error);
     }
