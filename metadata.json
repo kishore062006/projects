@@ -1,0 +1,8 @@
+{
+  "name": "EcoSync",
+  "description": "A gamified civic action and sustainability platform bridging citizen actions with municipal management.",
+  "requestFramePermissions": [
+    "geolocation",
+    "camera"
+  ]
+}

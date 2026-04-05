@@ -1,0 +1,75 @@
+import React, { useState, useEffect } from 'react';
+import { Sidebar } from './components/Sidebar';
+import { CitizenDashboard } from './views/CitizenDashboard';
+import { LearnModules } from './views/LearnModules';
+import { Rewards } from './views/Rewards';
+import { AuthorityPortal } from './views/AuthorityPortal';
+import { ReportIssue } from './views/ReportIssue';
+import { AuthPage } from './views/AuthPage';
+
+export type AuthUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: 'user' | 'admin';
+};
+
+export default function App() {
+  const [currentView, setCurrentView] = useState('dashboard');
+  const [user, setUser] = useState<AuthUser | null>(null);
+
+  useEffect(() => {
+    const storedUser = localStorage.getItem('ecoSyncUser');
+    if (storedUser) {
+      try {
+        setUser(JSON.parse(storedUser));
+      } catch {
+        localStorage.removeItem('ecoSyncUser');
+      }
+    }
+  }, []);
+
+  const handleAuthSuccess = (authenticatedUser: AuthUser) => {
+    setUser(authenticatedUser);
+    localStorage.setItem('ecoSyncUser', JSON.stringify(authenticatedUser));
+  };
+
+  const handleSignOut = () => {
+    setUser(null);
+    localStorage.removeItem('ecoSyncUser');
+  };
+
+  const renderView = () => {
+    switch (currentView) {
+      case 'dashboard':
+        return <CitizenDashboard />;
+      case 'report':
+        return <ReportIssue />;
+      case 'learn':
+        return <LearnModules />;
+      case 'rewards':
+        return <Rewards />;
+      case 'authority':
+        return <AuthorityPortal />;
+      default:
+        return <CitizenDashboard />;
+    }
+  };
+
+  if (!user) {
+    return <AuthPage onAuthSuccess={handleAuthSuccess} />;
+  }
+
+  return (
+    <div className="relative flex h-screen w-full bg-[#050505] overflow-hidden font-sans">
+      <div className="absolute top-0 left-0 h-full z-50 pointer-events-none">
+        <div className="pointer-events-auto h-full">
+          <Sidebar currentView={currentView} setCurrentView={setCurrentView} user={user} onSignOut={handleSignOut} />
+        </div>
+      </div>
+      <div className="flex-1 w-full h-full relative">
+        {renderView()}
+      </div>
+    </div>
+  );
+}
