@@ -21,7 +21,7 @@ View your app in AI Studio: https://ai.studio/apps/cb1ae81b-8975-4512-9727-81375
 
 ## Backend server
 
-This project now includes a local Express backend running at `http://localhost:4000`.
+This project now includes a local Express backend running at `http://localhost:4001`.
 
 - Start the backend with: `npm run server`
 - API base path: `/api`
@@ -40,3 +40,13 @@ If you want to run frontend and backend together during development, start two t
 npm run dev
 npm run server
 ```
+
+## Deploying Frontend To Vercel
+
+If your frontend is deployed on Vercel, do not use `localhost` API URLs in production.
+
+- Set `VITE_API_BASE_URL` in your Vercel project environment variables.
+- Example: `https://your-backend-domain.com`
+- The app will call auth endpoints like `${VITE_API_BASE_URL}/api/auth/login`.
+
+For local development, when `VITE_API_BASE_URL` is not set, the app automatically uses `http://localhost:4001`.
