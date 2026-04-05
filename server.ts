@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js';
-import bcrypt from 'bcryptjs';
 import type { Request, Response } from 'express';
 
 type ReportStatus = 'Open' | 'In Progress' | 'Resolved';
@@ -95,11 +94,6 @@ async function startServer() {
 
   const app = express();
   const PORT = Number(process.env.PORT || 4001);
-  const isProduction = process.env.NODE_ENV === 'production';
-  const corsAllowedOrigin = process.env.CORS_ALLOWED_ORIGIN?.trim() || '';
-  if (isProduction && !corsAllowedOrigin) {
-    throw new Error('CORS_ALLOWED_ORIGIN must be set in production.');
-  }
 
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -115,16 +109,7 @@ async function startServer() {
   });
 
   const crypto = await import('crypto');
-  const BCRYPT_ROUNDS = Number(process.env.BCRYPT_ROUNDS || 12);
-  const hashPassword = async (password: string) => bcrypt.hash(password, BCRYPT_ROUNDS);
-  const isBcryptHash = (hash: string) => hash.startsWith('$2a$') || hash.startsWith('$2b$') || hash.startsWith('$2y$');
-  const verifyPassword = async (password: string, storedHash: string) => {
-    if (isBcryptHash(storedHash)) {
-      return bcrypt.compare(password, storedHash);
-    }
-    const legacyHash = crypto.createHash('sha256').update(password).digest('hex');
-    return legacyHash === storedHash;
-  };
+  const hashPassword = (password: string) => crypto.createHash('sha256').update(password).digest('hex');
 
   const readStateSnapshot = async (): Promise<StateRow> => {
     const { data, error } = await supabase.from('app_state').select('state,updated_at').eq('id', STATE_ROW_ID).maybeSingle();
@@ -193,12 +178,7 @@ async function startServer() {
   };
 
   function corsMiddleware(req: Request, res: Response, next: () => void) {
-    if (corsAllowedOrigin) {
-      res.header('Access-Control-Allow-Origin', corsAllowedOrigin);
-      res.header('Vary', 'Origin');
-    } else {
-      res.header('Access-Control-Allow-Origin', '*');
-    }
+    res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     if (req.method === 'OPTIONS') {
@@ -249,7 +229,7 @@ async function startServer() {
 
     try {
       const normalizedEmail = String(email).trim().toLowerCase();
-      const passwordHash = await hashPassword(String(password));
+      const passwordHash = hashPassword(String(password));
 
       const user: User = {
         id: `USR-${Date.now()}`,
@@ -291,36 +271,14 @@ async function startServer() {
     try {
       const state = await readState();
       const normalizedEmail = String(email).trim().toLowerCase();
+      const passwordHash = hashPassword(String(password));
       const user = state.users.find((item) => item.email === normalizedEmail);
       if (!user) {
         return res.status(401).json({ message: 'Invalid credentials.' });
       }
 
-      const isValidPassword = await verifyPassword(String(password), user.passwordHash);
-      if (!isValidPassword) {
+      if (user.passwordHash !== passwordHash) {
         return res.status(401).json({ message: 'Invalid credentials.' });
-      }
-
-      if (!isBcryptHash(user.passwordHash)) {
-        const upgradedHash = await hashPassword(String(password));
-        await mutateState((currentState) => {
-          const userIndex = currentState.users.findIndex((item) => item.id === user.id);
-          if (userIndex === -1) {
-            return { nextState: currentState, result: null };
-          }
-
-          const currentUser = currentState.users[userIndex];
-          if (isBcryptHash(currentUser.passwordHash)) {
-            return { nextState: currentState, result: null };
-          }
-
-          const users = [...currentState.users];
-          users[userIndex] = { ...currentUser, passwordHash: upgradedHash };
-          return {
-            nextState: { ...currentState, users },
-            result: null,
-          };
-        });
       }
 
       res.json({ id: user.id, name: user.name, email: user.email, role: user.role });

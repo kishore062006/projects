@@ -27,11 +27,6 @@ Required environment variables for the backend:
 
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
-- `CORS_ALLOWED_ORIGIN` (your frontend URL, for production)
-
-Optional environment variables:
-
-- `BCRYPT_ROUNDS` (defaults to `12`)
 
 Create this table in Supabase first:
 
