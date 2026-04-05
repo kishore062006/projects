@@ -21,18 +21,37 @@ View your app in AI Studio: https://ai.studio/apps/cb1ae81b-8975-4512-9727-81375
 
 ## Backend server
 
-This project now includes a local Express backend running at `http://localhost:4001`.
+The Express backend now stores app data in Supabase instead of a local JSON file.
 
-- Start the backend with: `npm run server`
-- API base path: `/api`
-- Example endpoints:
-  - `GET /api/status`
-  - `GET /api/dashboard`
-  - `GET /api/reports`
-  - `POST /api/reports`
-  - `PATCH /api/reports/:id/resolve`
-  - `GET /api/rewards`
-  - `POST /api/redeem`
+Required environment variables for the backend:
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `CORS_ALLOWED_ORIGIN` (your frontend URL, for production)
+
+Optional environment variables:
+
+- `BCRYPT_ROUNDS` (defaults to `12`)
+
+Create this table in Supabase first:
+
+```sql
+create table if not exists app_state (
+   id text primary key,
+   state jsonb not null,
+   updated_at timestamptz not null default now()
+);
+```
+
+The backend still exposes the same API routes:
+
+- `GET /api/status`
+- `GET /api/dashboard`
+- `GET /api/reports`
+- `POST /api/reports`
+- `PATCH /api/reports/:id/resolve`
+- `GET /api/rewards`
+- `POST /api/redeem`
 
 If you want to run frontend and backend together during development, start two terminals:
 
