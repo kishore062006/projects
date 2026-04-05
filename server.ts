@@ -64,6 +64,16 @@ type AppState = {
   userMetrics: Record<string, UserMetrics>;
 };
 
+const defaultWeeklyGraphData: Array<{ name: string; carbon: number }> = [
+  { name: 'Monday', carbon: 0 },
+  { name: 'Tuesday', carbon: 0 },
+  { name: 'Wednesday', carbon: 0 },
+  { name: 'Thursday', carbon: 0 },
+  { name: 'Friday', carbon: 0 },
+  { name: 'Saturday', carbon: 0 },
+  { name: 'Sunday', carbon: 0 },
+];
+
 type StateRow = {
   id: string;
   state: AppState;
@@ -75,7 +85,7 @@ const MAX_STATE_WRITE_RETRIES = 5;
 
 const defaultState: AppState = {
   points: 0,
-  graphData: [],
+  graphData: defaultWeeklyGraphData.map((item) => ({ ...item })),
   actions: [],
   reports: [],
   rewards: [],
@@ -88,7 +98,10 @@ const cloneState = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 const normalizeState = (state?: Partial<AppState> | null): AppState => ({
   points: state?.points ?? defaultState.points,
-  graphData: state?.graphData ?? cloneState(defaultState.graphData),
+  graphData:
+    state?.graphData && state.graphData.length > 0
+      ? state.graphData
+      : cloneState(defaultState.graphData),
   actions: state?.actions ?? cloneState(defaultState.actions),
   reports: state?.reports ?? cloneState(defaultState.reports),
   rewards: state?.rewards ?? cloneState(defaultState.rewards),
@@ -580,7 +593,11 @@ async function startServer() {
       const graphEntry = await mutateState((state) => {
         const itemIndex = state.graphData.findIndex((entry) => entry.name === day);
         if (itemIndex === -1) {
-          throw new Error('DAY_NOT_FOUND');
+          const graphData = [...state.graphData, { name: String(day), carbon: Number(carbon.toFixed(1)) }];
+          return {
+            nextState: { ...state, graphData },
+            result: graphData[graphData.length - 1],
+          };
         }
 
         const graphData = [...state.graphData];
@@ -597,9 +614,6 @@ async function startServer() {
 
       res.json(graphEntry);
     } catch (error) {
-      if (error instanceof Error && error.message === 'DAY_NOT_FOUND') {
-        return res.status(404).json({ message: 'Day not found.' });
-      }
       handleStorageError(res, error);
     }
   });
