@@ -47,6 +47,12 @@ type User = {
   role: 'user' | 'admin';
 };
 
+type UserMetrics = {
+  waterSaved: number;
+  wasteReduced: number;
+  updatedAt: string;
+};
+
 type AppState = {
   points: number;
   graphData: Array<{ name: string; carbon: number }>;
@@ -55,6 +61,7 @@ type AppState = {
   rewards: Reward[];
   modules: ModuleItem[];
   users: User[];
+  userMetrics: Record<string, UserMetrics>;
 };
 
 type StateRow = {
@@ -74,6 +81,7 @@ const defaultState: AppState = {
   rewards: [],
   modules: [],
   users: [],
+  userMetrics: {},
 };
 
 const cloneState = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -86,6 +94,7 @@ const normalizeState = (state?: Partial<AppState> | null): AppState => ({
   rewards: state?.rewards ?? cloneState(defaultState.rewards),
   modules: state?.modules ?? cloneState(defaultState.modules),
   users: state?.users ?? cloneState(defaultState.users),
+  userMetrics: state?.userMetrics ?? cloneState(defaultState.userMetrics),
 });
 
 async function startServer() {
@@ -216,6 +225,79 @@ async function startServer() {
     try {
       const state = await readState();
       res.json(state.actions.slice(0, 20));
+    } catch (error) {
+      handleStorageError(res, error);
+    }
+  });
+
+  app.get('/api/users/:userId/metrics', async (req: Request, res: Response) => {
+    const { userId } = req.params;
+    if (!userId) {
+      return res.status(400).json({ message: 'User ID is required.' });
+    }
+
+    try {
+      const state = await readState();
+      const metrics = state.userMetrics[userId] ?? {
+        waterSaved: 0,
+        wasteReduced: 0,
+        updatedAt: new Date(0).toISOString(),
+      };
+
+      res.json(metrics);
+    } catch (error) {
+      handleStorageError(res, error);
+    }
+  });
+
+  app.post('/api/users/:userId/metrics/log-action', async (req: Request, res: Response) => {
+    const { userId } = req.params;
+    const { categoryId, amount } = req.body;
+
+    if (!userId || !categoryId || typeof amount !== 'number' || amount <= 0) {
+      return res.status(400).json({ message: 'Valid userId, categoryId, and amount are required.' });
+    }
+
+    try {
+      const metrics = await mutateState((state) => {
+        const existing = state.userMetrics[userId] ?? {
+          waterSaved: 0,
+          wasteReduced: 0,
+          updatedAt: new Date(0).toISOString(),
+        };
+
+        let nextWaterSaved = existing.waterSaved;
+        let nextWasteReduced = existing.wasteReduced;
+
+        if (categoryId === 'water_leak') {
+          nextWaterSaved += amount * 80;
+        }
+        if (categoryId === 'groceries') {
+          nextWasteReduced += amount * 4;
+        }
+        if (categoryId === 'cleanup') {
+          nextWasteReduced += amount * 6;
+        }
+
+        const nextMetrics: UserMetrics = {
+          waterSaved: nextWaterSaved,
+          wasteReduced: nextWasteReduced,
+          updatedAt: new Date().toISOString(),
+        };
+
+        return {
+          nextState: {
+            ...state,
+            userMetrics: {
+              ...state.userMetrics,
+              [userId]: nextMetrics,
+            },
+          },
+          result: nextMetrics,
+        };
+      });
+
+      res.json(metrics);
     } catch (error) {
       handleStorageError(res, error);
     }

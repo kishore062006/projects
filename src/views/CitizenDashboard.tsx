@@ -3,6 +3,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { AreaChart, Area, ResponsiveContainer, Tooltip, YAxis, XAxis } from 'recharts';
 import { Droplets, Wind, Recycle, Activity, ArrowUpRight, Leaf, Plus, Footprints, X } from 'lucide-react';
 import { LogActionModal } from '../components/LogActionModal';
+import type { AuthUser } from '../App';
+
+const API_BASE = (
+  import.meta.env.VITE_API_BASE_URL?.trim() || (import.meta.env.DEV ? 'http://localhost:4001' : '')
+).replace(/\/$/, '');
 
 // FIXED: Graph starts at 0 for all days. It will only grow when the user inputs data!
 const defaultGraphData = [
@@ -15,7 +20,11 @@ const defaultGraphData = [
   { name: 'Sunday', carbon: 0 },
 ];
 
-export function CitizenDashboard() {
+interface CitizenDashboardProps {
+  user: AuthUser | null;
+}
+
+export function CitizenDashboard({ user }: CitizenDashboardProps) {
   const [isLoggingAction, setIsLoggingAction] = useState(false);
   
   const [recentActions, setRecentActions] = useState<any[]>([]);
@@ -54,7 +63,29 @@ export function CitizenDashboard() {
 
     const savedGraph = JSON.parse(localStorage.getItem('ecoGraphData') || 'null');
     if (savedGraph) setGraphData(savedGraph);
-  }, []);
+
+    const loadMetrics = async () => {
+      if (!user?.id || !API_BASE) return;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/users/${user.id}/metrics`);
+        if (!response.ok) return;
+        const data = await response.json();
+
+        const nextWaterSaved = Number(data?.waterSaved || 0);
+        const nextWasteReduced = Number(data?.wasteReduced || 0);
+
+        setWaterSaved(nextWaterSaved);
+        setWasteReduced(nextWasteReduced);
+        localStorage.setItem('ecoWaterSaved', String(nextWaterSaved));
+        localStorage.setItem('ecoWasteReduced', String(nextWasteReduced));
+      } catch {
+        // Keep local values if backend metrics fetch fails.
+      }
+    };
+
+    void loadMetrics();
+  }, [user]);
 
   const handleLogAction = (categoryId: string, title: string, points: number, amount: number) => {
     const newAction = {
@@ -91,6 +122,33 @@ export function CitizenDashboard() {
     localStorage.setItem('ecoPoints', newTotalPoints.toString());
     localStorage.setItem('ecoWaterSaved', newWater.toString());
     localStorage.setItem('ecoWasteReduced', newWaste.toString());
+
+    const syncMetrics = async () => {
+      if (!user?.id || !API_BASE) return;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/users/${user.id}/metrics/log-action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ categoryId, amount }),
+        });
+
+        if (!response.ok) return;
+        const data = await response.json();
+        if (typeof data?.waterSaved === 'number') {
+          setWaterSaved(data.waterSaved);
+          localStorage.setItem('ecoWaterSaved', String(data.waterSaved));
+        }
+        if (typeof data?.wasteReduced === 'number') {
+          setWasteReduced(data.wasteReduced);
+          localStorage.setItem('ecoWasteReduced', String(data.wasteReduced));
+        }
+      } catch {
+        // Local fallback already applied above.
+      }
+    };
+
+    void syncMetrics();
   };
 
   const handleLogWalk = (e: React.FormEvent) => {

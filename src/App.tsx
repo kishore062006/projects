@@ -42,7 +42,7 @@ export default function App() {
   const renderView = () => {
     switch (currentView) {
       case 'dashboard':
-        return <CitizenDashboard />;
+        return <CitizenDashboard user={user} />;
       case 'report':
         return <ReportIssue />;
       case 'learn':
@@ -52,7 +52,7 @@ export default function App() {
       case 'authority':
         return <AuthorityPortal />;
       default:
-        return <CitizenDashboard />;
+        return <CitizenDashboard user={user} />;
     }
   };
 
