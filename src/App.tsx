@@ -48,7 +48,7 @@ export default function App() {
       case 'learn':
         return <LearnModules />;
       case 'rewards':
-        return <Rewards />;
+        return <Rewards user={user} />;
       case 'authority':
         return <AuthorityPortal />;
       default:

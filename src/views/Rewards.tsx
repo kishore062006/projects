@@ -1,17 +1,89 @@
 import { useState, useEffect } from 'react';
 import { Leaf, Coffee, Bus, ShoppingBag, CheckCircle2 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import type { AuthUser } from '../App';
 
-export function Rewards() {
+const API_BASE = (
+  import.meta.env.VITE_API_BASE_URL?.trim() || (import.meta.env.DEV ? 'http://localhost:4001' : '')
+).replace(/\/$/, '');
+
+type UserMetricsResponse = {
+  waterSaved: number;
+  wasteReduced: number;
+};
+
+type DashboardResponse = {
+  points: number;
+  graphData: Array<{ name: string; carbon: number }>;
+};
+
+interface RewardsProps {
+  user: AuthUser | null;
+}
+
+export function Rewards({ user }: RewardsProps) {
   // ADDED: Real Balance State
   const [balance, setBalance] = useState(0);
+  const [waterSaved, setWaterSaved] = useState(0);
+  const [transitDays, setTransitDays] = useState(0);
 
   useEffect(() => {
     const savedPoints = localStorage.getItem('ecoPoints');
     if (savedPoints) {
       setBalance(parseInt(savedPoints));
     }
-  }, []);
+
+    const savedWater = localStorage.getItem('ecoWaterSaved');
+    if (savedWater) {
+      setWaterSaved(parseInt(savedWater));
+    }
+
+    const savedGraph = JSON.parse(localStorage.getItem('ecoGraphData') || '[]') as Array<{ name: string; carbon: number }>;
+    if (Array.isArray(savedGraph)) {
+      setTransitDays(savedGraph.filter((day) => Number(day?.carbon || 0) > 0).length);
+    }
+
+    const loadDynamicChallengeData = async () => {
+      if (!API_BASE) return;
+
+      try {
+        const dashboardResponse = await fetch(`${API_BASE}/api/dashboard`);
+        if (dashboardResponse.ok) {
+          const dashboardData = (await dashboardResponse.json()) as DashboardResponse;
+          const nextBalance = Number(dashboardData?.points || 0);
+          setBalance(nextBalance);
+          localStorage.setItem('ecoPoints', String(nextBalance));
+
+          if (Array.isArray(dashboardData?.graphData)) {
+            const nextTransitDays = dashboardData.graphData.filter((day) => Number(day?.carbon || 0) > 0).length;
+            setTransitDays(nextTransitDays);
+            localStorage.setItem('ecoGraphData', JSON.stringify(dashboardData.graphData));
+          }
+        }
+      } catch {
+        // Keep local fallback values.
+      }
+
+      if (!user?.id) return;
+
+      try {
+        const metricsResponse = await fetch(`${API_BASE}/api/users/${user.id}/metrics`);
+        if (!metricsResponse.ok) return;
+
+        const metricsData = (await metricsResponse.json()) as UserMetricsResponse;
+        const nextWaterSaved = Number(metricsData?.waterSaved || 0);
+        setWaterSaved(nextWaterSaved);
+        localStorage.setItem('ecoWaterSaved', String(nextWaterSaved));
+      } catch {
+        // Keep local fallback values.
+      }
+    };
+
+    void loadDynamicChallengeData();
+  }, [user]);
+
+  const bucketBathProgress = Math.min(7, Math.floor(waterSaved / 80));
+  const transitTrailblazerProgress = Math.min(5, transitDays);
 
   // ADDED: Redeem Logic
   const handleRedeem = (cost: number, rewardName: string) => {
@@ -121,14 +193,14 @@ export function Rewards() {
         <div className="space-y-4">
           <ChallengeCard 
             title="The 7-Day Bucket Bath (SDG 6)"
-            progress={4}
+            progress={bucketBathProgress}
             total={7}
             reward={300}
             delay={0.7}
           />
           <ChallengeCard 
             title="Transit Trailblazer (SDG 11)"
-            progress={2}
+            progress={transitTrailblazerProgress}
             total={5}
             reward={250}
             delay={0.8}
