@@ -106,6 +106,18 @@ type WalkStopResponse = {
   verified?: boolean;
 };
 
+type UserReportItem = {
+  id: string;
+  type?: string;
+  location?: string;
+  status?: string;
+  time?: string;
+  priority?: string;
+  timestamp?: string;
+  reporter?: string;
+  ownerUserId?: string;
+};
+
 interface CitizenDashboardProps {
   user: AuthUser | null;
 }
@@ -124,6 +136,7 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
   
   const [resolvedCount, setResolvedCount] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
+  const [myReports, setMyReports] = useState<UserReportItem[]>([]);
 
   const [graphData, setGraphData] = useState(defaultGraphData);
   
@@ -190,7 +203,14 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
     if (savedWaste) setWasteReduced(parseFloat(savedWaste));
 
     const savedReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]');
-    const scopedReports = scopeReportsToAccount(savedReports, user);
+    const scopedReports = scopeReportsToAccount(savedReports, user) as UserReportItem[];
+    setMyReports(
+      [...scopedReports].sort((left, right) => {
+        const leftTime = new Date(left.timestamp || left.time || 0).getTime();
+        const rightTime = new Date(right.timestamp || right.time || 0).getTime();
+        return rightTime - leftTime;
+      }),
+    );
     const resolved = scopedReports.filter((report: any) => report.status === 'Resolved').length;
     const pending = scopedReports.filter((report: any) => report.status !== 'Resolved').length;
     
@@ -251,8 +271,47 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
       }
     };
 
+    const loadReports = async () => {
+      if (!user?.id) return;
+
+      if (API_BASE) {
+        try {
+          const response = await fetch(
+            `${API_BASE}/api/reports?userId=${encodeURIComponent(user.id)}&role=${encodeURIComponent(user.role)}`,
+          );
+
+          if (response.ok) {
+            const data = (await response.json()) as UserReportItem[];
+            const scoped = scopeReportsToAccount(Array.isArray(data) ? data : [], user) as UserReportItem[];
+            setMyReports(
+              [...scoped].sort((left, right) => {
+                const leftTime = new Date(left.timestamp || left.time || 0).getTime();
+                const rightTime = new Date(right.timestamp || right.time || 0).getTime();
+                return rightTime - leftTime;
+              }),
+            );
+            localStorage.setItem('ecoSyncReports', JSON.stringify(scoped));
+            return;
+          }
+        } catch {
+          // Fall back to local data below.
+        }
+      }
+
+      const savedReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]') as UserReportItem[];
+      const scoped = scopeReportsToAccount(savedReports, user) as UserReportItem[];
+      setMyReports(
+        [...scoped].sort((left, right) => {
+          const leftTime = new Date(left.timestamp || left.time || 0).getTime();
+          const rightTime = new Date(right.timestamp || right.time || 0).getTime();
+          return rightTime - leftTime;
+        }),
+      );
+    };
+
     void loadDashboard();
     void loadMetrics();
+    void loadReports();
   }, [user]);
 
   useEffect(() => {
@@ -993,6 +1052,54 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
                 {wasteReduced === 0 ? 'No data yet' : 'Waste avoided through logged actions'}
               </p>
             </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.5 }}
+            className="md:col-span-12 bg-white/[0.02] border border-white/[0.05] rounded-[2rem] p-8 backdrop-blur-2xl"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+              <div>
+                <p className="text-xs font-bold tracking-widest text-zinc-500 uppercase mb-2 flex items-center gap-2">
+                  <Activity size={16} className="text-emerald-400" /> My Reports
+                </p>
+                <h3 className="text-2xl font-bold text-white">Your recent submissions</h3>
+              </div>
+              <div className="text-sm text-zinc-400">
+                {myReports.length === 0 ? 'No reports submitted yet' : `${myReports.length} report${myReports.length === 1 ? '' : 's'}`}
+              </div>
+            </div>
+
+            {myReports.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-white/10 bg-black/20 p-8 text-zinc-400">
+                Your submitted reports will appear here once you create them.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {myReports.slice(0, 6).map((report) => {
+                  const statusIsResolved = String(report.status || '').toLowerCase() === 'resolved';
+                  return (
+                    <div key={report.id} className="rounded-3xl border border-white/10 bg-black/20 p-5">
+                      <div className="flex items-start justify-between gap-4 mb-4">
+                        <div>
+                          <p className="text-sm font-semibold text-white">{report.type || 'Civic Report'}</p>
+                          <p className="text-xs text-zinc-500 mt-1">{report.location || 'Location unavailable'}</p>
+                        </div>
+                        <span className={`text-xs font-semibold px-3 py-1 rounded-full ${statusIsResolved ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}`}>
+                          {report.status || 'Open'}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400">
+                        <span className="rounded-full border border-white/10 px-3 py-1">{report.time || 'Recently submitted'}</span>
+                        {report.priority && <span className="rounded-full border border-white/10 px-3 py-1">Priority: {report.priority}</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </motion.div>
 
         </div>

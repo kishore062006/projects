@@ -7,6 +7,7 @@ import { AuthorityPortal } from './views/AuthorityPortal';
 import { ReportIssue } from './views/ReportIssue';
 import { AuthPage } from './views/AuthPage';
 import { Helplines } from './views/Helplines';
+import { About } from './views/About';
 
 export type AuthUser = {
   id: string;
@@ -54,6 +55,8 @@ export default function App() {
         return <LearnModules />;
       case 'rewards':
         return <Rewards user={user} />;
+      case 'about':
+        return <About />;
       case 'helplines':
         return <Helplines />;
       case 'authority':

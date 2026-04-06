@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LayoutDashboard, AlertTriangle, BookOpen, Gift, ShieldAlert, Leaf, PhoneCall } from 'lucide-react';
+import { LayoutDashboard, AlertTriangle, BookOpen, Gift, ShieldAlert, Leaf, PhoneCall, Info } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { API_BASE } from '../lib/api';
 
@@ -54,6 +54,7 @@ export function Sidebar({ currentView, setCurrentView, user, onSignOut }: Sideba
     { id: 'report', label: 'Report Issue', icon: AlertTriangle },
     { id: 'learn', label: 'Learn', icon: BookOpen },
     { id: 'rewards', label: 'Rewards', icon: Gift },
+    { id: 'about', label: 'About', icon: Info },
     ...(isLeader ? [{ id: 'authority', label: 'Authority Portal', icon: ShieldAlert }] : []),
     { id: 'helplines', label: 'Helplines', icon: PhoneCall },
   ];
