@@ -13,11 +13,14 @@ const AI_CATEGORIES = [
   'Damaged Green Infrastructure (SDG 13)',
 ] as const;
 
-const getFallbackCategory = (hintCategory: string | null) => {
+const getFallbackCategory = (hintCategory: string | null, currentCategory?: string) => {
   if (hintCategory && AI_CATEGORIES.includes(hintCategory as (typeof AI_CATEGORIES)[number])) {
     return hintCategory as (typeof AI_CATEGORIES)[number];
   }
-  return 'Damaged Green Infrastructure (SDG 13)';
+  if (currentCategory && AI_CATEGORIES.includes(currentCategory as (typeof AI_CATEGORIES)[number])) {
+    return currentCategory as (typeof AI_CATEGORIES)[number];
+  }
+  return 'Water Leakage (SDG 6)';
 };
 
 const fallbackDetailsByCategory: Record<(typeof AI_CATEGORIES)[number], string> = {
@@ -204,13 +207,13 @@ export function ReportIssue({ user }: ReportIssueProps) {
     };
 
     const applyFallback = () => {
-      const detectedCategory = getFallbackCategory(categoryHint || null);
+      const detectedCategory = getFallbackCategory(categoryHint || null, category);
       if (!categoryManuallySet) {
         setCategory(detectedCategory);
       }
       setDescription(
         buildAnalysisText(
-          `AI-assisted fallback: Potential ${detectedCategory.split('(')[0].trim()} spotted in the image.`,
+          `AI analysis is temporarily unavailable. Please review the selected category manually before submitting.`,
           fallbackDetailsByCategory[detectedCategory],
         ),
       );
@@ -237,7 +240,7 @@ export function ReportIssue({ user }: ReportIssueProps) {
       const data = (await response.json()) as { category?: string; description?: string; additionalDetails?: string };
       const detectedCategory = AI_CATEGORIES.includes((data.category || '') as (typeof AI_CATEGORIES)[number])
         ? (data.category as (typeof AI_CATEGORIES)[number])
-        : getFallbackCategory(categoryHint || null);
+        : getFallbackCategory(categoryHint || null, category);
 
       if (!categoryManuallySet) {
         setCategory(detectedCategory);
