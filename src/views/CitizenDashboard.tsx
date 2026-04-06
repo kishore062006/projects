@@ -4,10 +4,7 @@ import { AreaChart, Area, ResponsiveContainer, Tooltip, YAxis, XAxis } from 'rec
 import { Droplets, Wind, Recycle, Activity, ArrowUpRight, Leaf, Plus, Footprints, X } from 'lucide-react';
 import { LogActionModal } from '../components/LogActionModal';
 import type { AuthUser } from '../App';
-
-const API_BASE = (
-  import.meta.env.VITE_API_BASE_URL?.trim() || (import.meta.env.DEV ? 'http://localhost:4001' : '')
-).replace(/\/$/, '');
+import { API_BASE } from '../lib/api';
 
 // Average-based impact factors sourced from official datasets.
 // - US EPA: Passenger vehicle emits ~404 g CO2 per mile -> ~0.251 kg CO2 per km.

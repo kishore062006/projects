@@ -3,10 +3,7 @@ import { MapPin, AlertCircle, CheckCircle, Clock, Filter, CheckSquare, List } fr
 // ADDED: Leaflet Map Imports
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import * as L from 'leaflet';
-
-const API_BASE = (
-  import.meta.env.VITE_API_BASE_URL?.trim() || (import.meta.env.DEV ? 'http://localhost:4001' : '')
-).replace(/\/$/, '');
+import { API_BASE } from '../lib/api';
 
 // Fix for default Leaflet marker icons in React
 delete (L.Icon.Default.prototype as any)._getIconUrl;

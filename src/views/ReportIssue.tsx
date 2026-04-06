@@ -1,10 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Camera, MapPin, Upload, AlertTriangle, Cpu, X } from 'lucide-react';
 import { motion } from 'framer-motion';
-
-const API_BASE = (
-  import.meta.env.VITE_API_BASE_URL?.trim() || (import.meta.env.DEV ? 'http://localhost:4001' : '')
-).replace(/\/$/, '');
+import { API_BASE } from '../lib/api';
 
 export function ReportIssue() {
   const [isSubmitting, setIsSubmitting] = useState(false);

@@ -2,10 +2,7 @@ import { useState, useEffect } from 'react';
 import { Leaf, Coffee, Bus, ShoppingBag, CheckCircle2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import type { AuthUser } from '../App';
-
-const API_BASE = (
-  import.meta.env.VITE_API_BASE_URL?.trim() || (import.meta.env.DEV ? 'http://localhost:4001' : '')
-).replace(/\/$/, '');
+import { API_BASE } from '../lib/api';
 
 type UserMetricsResponse = {
   waterSaved: number;
