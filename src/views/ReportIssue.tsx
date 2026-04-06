@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Camera, MapPin, Upload, AlertTriangle, Cpu, X } from 'lucide-react';
 import { motion } from 'framer-motion';
+import type { AuthUser } from '../App';
 import { API_BASE } from '../lib/api';
 
 const AI_CATEGORIES = [
@@ -15,7 +16,11 @@ const fallbackCategoryFromImage = (imageDataUrl: string) => {
   return AI_CATEGORIES[index];
 };
 
-export function ReportIssue() {
+type ReportIssueProps = {
+  user: AuthUser | null;
+};
+
+export function ReportIssue({ user }: ReportIssueProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   
@@ -187,11 +192,13 @@ export function ReportIssue() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
+
+    const reporterName = user?.name?.trim() || user?.email?.trim() || 'Anonymous Reporter';
     
     const reportData = {
       type: category.split(' (')[0],
       priority: category.includes('SDG 6') ? 'Critical' : 'High',
-      reporter: 'Jane D.',
+      reporter: reporterName,
       location,
       description,
       image: imagePreview,

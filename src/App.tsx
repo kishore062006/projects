@@ -44,7 +44,7 @@ export default function App() {
       case 'dashboard':
         return <CitizenDashboard user={user} />;
       case 'report':
-        return <ReportIssue />;
+        return <ReportIssue user={user} />;
       case 'learn':
         return <LearnModules />;
       case 'rewards':
