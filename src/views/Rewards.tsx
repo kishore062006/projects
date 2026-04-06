@@ -27,6 +27,7 @@ export function Rewards({ user }: RewardsProps) {
   const [balance, setBalance] = useState(0);
   const [waterSaved, setWaterSaved] = useState(0);
   const [transitDays, setTransitDays] = useState(0);
+  const [validatedChallenges, setValidatedChallenges] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     const savedPoints = localStorage.getItem('ecoPoints');
@@ -42,6 +43,11 @@ export function Rewards({ user }: RewardsProps) {
     const savedGraph = JSON.parse(localStorage.getItem('ecoGraphData') || '[]') as Array<{ name: string; carbon: number }>;
     if (Array.isArray(savedGraph)) {
       setTransitDays(savedGraph.filter((day) => Number(day?.carbon || 0) > 0).length);
+    }
+
+    const savedValidatedChallenges = JSON.parse(localStorage.getItem('ecoValidatedChallenges') || '{}') as Record<string, boolean>;
+    if (savedValidatedChallenges && typeof savedValidatedChallenges === 'object') {
+      setValidatedChallenges(savedValidatedChallenges);
     }
 
     const loadDynamicChallengeData = async () => {
@@ -96,6 +102,31 @@ export function Rewards({ user }: RewardsProps) {
     } else {
       alert(`Not enough Leaves! You need ${cost - balance} more to redeem this reward.`);
     }
+  };
+
+  const handleValidateChallenge = (challengeKey: string, progress: number, total: number, reward: number, challengeName: string) => {
+    if (validatedChallenges[challengeKey]) {
+      alert(`Challenge already validated: ${challengeName}.`);
+      return;
+    }
+
+    if (progress < total) {
+      alert(`You can validate \"${challengeName}\" after completing ${total} days.`);
+      return;
+    }
+
+    const nextBalance = balance + reward;
+    const nextValidatedChallenges = {
+      ...validatedChallenges,
+      [challengeKey]: true,
+    };
+
+    setBalance(nextBalance);
+    setValidatedChallenges(nextValidatedChallenges);
+    localStorage.setItem('ecoPoints', String(nextBalance));
+    localStorage.setItem('ecoValidatedChallenges', JSON.stringify(nextValidatedChallenges));
+
+    alert(`Challenge validated: ${challengeName}! +${reward} Leaves added.`);
   };
 
   return (
@@ -198,6 +229,8 @@ export function Rewards({ user }: RewardsProps) {
             total={7}
             reward={300}
             delay={0.7}
+            isValidated={Boolean(validatedChallenges.bucketBath)}
+            onValidate={() => handleValidateChallenge('bucketBath', bucketBathProgress, 7, 300, 'The 7-Day Bucket Bath')}
           />
           <ChallengeCard 
             title="Transit Trailblazer (SDG 11)"
@@ -205,6 +238,8 @@ export function Rewards({ user }: RewardsProps) {
             total={5}
             reward={250}
             delay={0.8}
+            isValidated={Boolean(validatedChallenges.transitTrailblazer)}
+            onValidate={() => handleValidateChallenge('transitTrailblazer', transitTrailblazerProgress, 5, 250, 'Transit Trailblazer')}
           />
         </div>
       </div>
@@ -236,8 +271,11 @@ function RewardCard({ icon: Icon, title, description, cost, color, iconColor, de
   );
 }
 
-function ChallengeCard({ title, progress, total, reward, delay = 0 }: any) {
+function ChallengeCard({ title, progress, total, reward, delay = 0, onValidate, isValidated }: any) {
   const percentage = (progress / total) * 100;
+  const isCompleted = progress >= total;
+  const canValidate = isCompleted && !isValidated;
+
   return (
     <motion.div 
       initial={{ opacity: 0, x: -20 }}
@@ -262,6 +300,13 @@ function ChallengeCard({ title, progress, total, reward, delay = 0 }: any) {
         <div className="flex items-center gap-1 font-bold text-white">
           +{reward} <Leaf size={16} />
         </div>
+        <button
+          onClick={onValidate}
+          disabled={!canValidate}
+          className="mt-3 px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-[#D4AF37]/10 text-white hover:bg-[#D4AF37]/20"
+        >
+          {isValidated ? 'Validated' : 'Validate'}
+        </button>
       </div>
     </motion.div>
   );
