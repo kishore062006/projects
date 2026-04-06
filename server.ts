@@ -103,11 +103,6 @@ type User = {
   name: string;
   email: string;
   passwordHash: string;
-  emailVerified?: boolean;
-  emailVerificationTokenHash?: string;
-  emailVerificationSentAt?: string;
-  passwordResetTokenHash?: string;
-  passwordResetExpiresAt?: string;
   role: 'user' | 'admin';
 };
 
@@ -491,82 +486,6 @@ async function startServer() {
 
   const crypto = await import('crypto');
   const hashPassword = (password: string) => crypto.createHash('sha256').update(password).digest('hex');
-  const createAuthToken = () => crypto.randomBytes(32).toString('hex');
-  const hashAuthToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
-  const authAppBaseUrl = (process.env.APP_BASE_URL?.trim() || process.env.FRONTEND_BASE_URL?.trim() || 'http://localhost:3000').replace(/\/$/, '');
-
-  const smtpHost = process.env.SMTP_HOST?.trim() || '';
-  const smtpPort = Number(process.env.SMTP_PORT || 587);
-  const smtpUser = process.env.SMTP_USER?.trim() || '';
-  const smtpPass = process.env.SMTP_PASS?.trim() || '';
-  const smtpFrom = process.env.SMTP_FROM?.trim() || smtpUser;
-
-  let authMailer: { sendMail: (mail: { from: string; to: string; subject: string; text: string; html: string }) => Promise<unknown> } | null = null;
-  if (smtpHost && smtpUser && smtpPass && smtpFrom) {
-    try {
-      const nodemailerModule = await import('nodemailer');
-      const nodemailer = (nodemailerModule as any).default ?? nodemailerModule;
-      authMailer = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: smtpPort === 465,
-        auth: {
-          user: smtpUser,
-          pass: smtpPass,
-        },
-      });
-    } catch (error) {
-      console.error('Failed to configure auth mailer:', error);
-    }
-  }
-
-  const sendAuthEmail = async ({
-    to,
-    subject,
-    intro,
-    actionText,
-    actionUrl,
-  }: {
-    to: string;
-    subject: string;
-    intro: string;
-    actionText: string;
-    actionUrl: string;
-  }) => {
-    if (!authMailer || !smtpFrom) {
-      return false;
-    }
-
-    const safeActionUrl = actionUrl.replace(/"/g, '&quot;');
-    const text = `${intro}\n\n${actionText}: ${actionUrl}\n\nIf you did not request this, you can ignore this email.`;
-    const html = `
-      <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111827;max-width:560px;">
-        <p>${intro}</p>
-        <p>
-          <a href="${safeActionUrl}" style="display:inline-block;padding:10px 16px;background:#10b981;color:#000;text-decoration:none;border-radius:8px;font-weight:700;">
-            ${actionText}
-          </a>
-        </p>
-        <p style="font-size:12px;color:#6b7280;word-break:break-all;">${actionUrl}</p>
-        <p style="font-size:12px;color:#6b7280;">If you did not request this, you can ignore this email.</p>
-      </div>
-    `;
-
-    try {
-      await authMailer.sendMail({
-        from: smtpFrom,
-        to,
-        subject,
-        text,
-        html,
-      });
-      return true;
-    } catch (error) {
-      console.error('Failed to send auth email:', error);
-      return false;
-    }
-  };
-
   const geminiApiKey = process.env.GEMINI_API_KEY?.trim() || '';
   const geminiClient = geminiApiKey ? new GoogleGenAI({ apiKey: geminiApiKey }) : null;
 
@@ -780,18 +699,12 @@ async function startServer() {
     try {
       const normalizedEmail = String(email).trim().toLowerCase();
       const passwordHash = hashPassword(String(password));
-      const verificationToken = createAuthToken();
-      const verificationTokenHash = hashAuthToken(verificationToken);
-      const verificationSentAt = new Date().toISOString();
 
       const user: User = {
         id: `USR-${Date.now()}`,
         name: String(name).trim(),
         email: normalizedEmail,
         passwordHash,
-        emailVerified: false,
-        emailVerificationTokenHash: verificationTokenHash,
-        emailVerificationSentAt: verificationSentAt,
         role: getRoleForEmail(normalizedEmail),
       };
 
@@ -809,22 +722,7 @@ async function startServer() {
         };
       });
 
-      const verifyUrl = `${authAppBaseUrl}/?verifyToken=${encodeURIComponent(verificationToken)}`;
-      const emailSent = await sendAuthEmail({
-        to: user.email,
-        subject: 'Verify your EcoSync account',
-        intro: `Hi ${user.name}, please verify your email to activate your EcoSync account.`,
-        actionText: 'Verify Email',
-        actionUrl: verifyUrl,
-      });
-
-      return res.status(201).json({
-        message: emailSent
-          ? 'Account created. Check your inbox to verify your email before signing in.'
-          : 'Account created, but verification email could not be sent. Configure SMTP settings and try again.',
-        emailVerificationRequired: true,
-        ...(process.env.NODE_ENV !== 'production' ? { devVerificationToken: verificationToken } : {}),
-      });
+      res.status(201).json({ id: user.id, name: user.name, email: user.email, role: user.role });
     } catch (error) {
       if (error instanceof Error && error.message === 'EMAIL_ALREADY_EXISTS') {
         return res.status(400).json({ message: 'Email already in use.' });
@@ -852,172 +750,10 @@ async function startServer() {
         return res.status(401).json({ message: 'Invalid credentials.' });
       }
 
-      const isEmailVerified = user.emailVerified !== false;
-      if (!isEmailVerified) {
-        return res.status(403).json({
-          message: 'Please verify your email before signing in. Check your inbox for the verification link.',
-        });
-      }
-
       const effectiveRole = getRoleForEmail(user.email);
       res.json({ id: user.id, name: user.name, email: user.email, role: effectiveRole });
     } catch (error) {
       handleStorageError(res, error);
-    }
-  });
-
-  app.post('/api/auth/verify-email', async (req: Request, res: Response) => {
-    const { token } = req.body as { token?: string };
-    if (!token) {
-      return res.status(400).json({ message: 'Verification token is required.' });
-    }
-
-    try {
-      const tokenHash = hashAuthToken(String(token));
-      const result = await mutateState((state) => {
-        const targetIndex = state.users.findIndex(
-          (user) => String(user.emailVerificationTokenHash || '') === tokenHash,
-        );
-        if (targetIndex < 0) {
-          throw new Error('INVALID_VERIFICATION_TOKEN');
-        }
-
-        const targetUser = state.users[targetIndex];
-        const nextUsers = [...state.users];
-        nextUsers[targetIndex] = {
-          ...targetUser,
-          emailVerified: true,
-          emailVerificationTokenHash: undefined,
-          emailVerificationSentAt: undefined,
-        };
-
-        return {
-          nextState: {
-            ...state,
-            users: nextUsers,
-          },
-          result: null,
-        };
-      });
-
-      void result;
-      return res.json({ message: 'Email verified successfully. You can now sign in.' });
-    } catch (error) {
-      if (error instanceof Error && error.message === 'INVALID_VERIFICATION_TOKEN') {
-        return res.status(400).json({ message: 'Verification link is invalid or expired.' });
-      }
-      return handleStorageError(res, error);
-    }
-  });
-
-  app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
-    const { email } = req.body as { email?: string };
-    if (!email) {
-      return res.status(400).json({ message: 'Email is required.' });
-    }
-
-    try {
-      const normalizedEmail = String(email).trim().toLowerCase();
-      const resetToken = createAuthToken();
-      const resetTokenHash = hashAuthToken(resetToken);
-      const resetExpiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-
-      const targetUser = await mutateState((state) => {
-        const userIndex = state.users.findIndex((user) => user.email === normalizedEmail);
-        if (userIndex < 0) {
-          return {
-            nextState: state,
-            result: null,
-          };
-        }
-
-        const existingUser = state.users[userIndex];
-        const nextUsers = [...state.users];
-        nextUsers[userIndex] = {
-          ...existingUser,
-          passwordResetTokenHash: resetTokenHash,
-          passwordResetExpiresAt: resetExpiresAt,
-        };
-
-        return {
-          nextState: {
-            ...state,
-            users: nextUsers,
-          },
-          result: {
-            email: existingUser.email,
-            name: existingUser.name,
-          },
-        };
-      });
-
-      if (targetUser) {
-        const resetUrl = `${authAppBaseUrl}/?resetToken=${encodeURIComponent(resetToken)}`;
-        await sendAuthEmail({
-          to: targetUser.email,
-          subject: 'Reset your EcoSync password',
-          intro: `Hi ${targetUser.name}, we received a request to reset your password.`,
-          actionText: 'Reset Password',
-          actionUrl: resetUrl,
-        });
-      }
-
-      return res.json({
-        message: 'If an account exists for this email, a password reset link has been sent.',
-        ...(process.env.NODE_ENV !== 'production' && targetUser ? { devResetToken: resetToken } : {}),
-      });
-    } catch (error) {
-      return handleStorageError(res, error);
-    }
-  });
-
-  app.post('/api/auth/reset-password', async (req: Request, res: Response) => {
-    const { token, password } = req.body as { token?: string; password?: string };
-    if (!token || !password) {
-      return res.status(400).json({ message: 'Reset token and new password are required.' });
-    }
-
-    try {
-      const tokenHash = hashAuthToken(String(token));
-      const nextPasswordHash = hashPassword(String(password));
-      const nowIso = new Date().toISOString();
-
-      await mutateState((state) => {
-        const userIndex = state.users.findIndex((user) => {
-          if (String(user.passwordResetTokenHash || '') !== tokenHash) {
-            return false;
-          }
-          return Boolean(user.passwordResetExpiresAt && user.passwordResetExpiresAt > nowIso);
-        });
-
-        if (userIndex < 0) {
-          throw new Error('INVALID_RESET_TOKEN');
-        }
-
-        const existingUser = state.users[userIndex];
-        const nextUsers = [...state.users];
-        nextUsers[userIndex] = {
-          ...existingUser,
-          passwordHash: nextPasswordHash,
-          passwordResetTokenHash: undefined,
-          passwordResetExpiresAt: undefined,
-        };
-
-        return {
-          nextState: {
-            ...state,
-            users: nextUsers,
-          },
-          result: null,
-        };
-      });
-
-      return res.json({ message: 'Password updated successfully. Please sign in.' });
-    } catch (error) {
-      if (error instanceof Error && error.message === 'INVALID_RESET_TOKEN') {
-        return res.status(400).json({ message: 'Reset link is invalid or expired.' });
-      }
-      return handleStorageError(res, error);
     }
   });
 
