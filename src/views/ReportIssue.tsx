@@ -3,6 +3,18 @@ import { Camera, MapPin, Upload, AlertTriangle, Cpu, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { API_BASE } from '../lib/api';
 
+const AI_CATEGORIES = [
+  'Water Leakage (SDG 6)',
+  'Illegal Dumping (SDG 11)',
+  'Polluted Water Body (SDG 6)',
+  'Damaged Green Infrastructure (SDG 13)',
+] as const;
+
+const fallbackCategoryFromImage = (imageDataUrl: string) => {
+  const index = imageDataUrl.length % AI_CATEGORIES.length;
+  return AI_CATEGORIES[index];
+};
+
 export function ReportIssue() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -75,20 +87,52 @@ export function ReportIssue() {
         const dataUrl = canvas.toDataURL('image/jpeg');
         setImagePreview(dataUrl);
         stopCamera();
-        triggerAITagging(); 
+        void triggerAITagging(dataUrl);
       }
     }
   };
 
-  const triggerAITagging = () => {
+  const triggerAITagging = async (imageDataUrl: string) => {
     setIsAITagging(true);
-    setTimeout(() => {
-      const aiCategories = ["Water Leakage (SDG 6)", "Illegal Dumping (SDG 11)", "Damaged Green Infrastructure (SDG 13)"];
-      const detectedCategory = aiCategories[Math.floor(Math.random() * aiCategories.length)];
+
+    const applyFallback = () => {
+      const detectedCategory = fallbackCategoryFromImage(imageDataUrl);
       setCategory(detectedCategory);
-      setDescription(`AI Auto-detected: Potential ${detectedCategory.split('(')[0].trim()} spotted in the image. Requires immediate attention.`);
+      setDescription(`AI-assisted fallback: Potential ${detectedCategory.split('(')[0].trim()} spotted in the image. Requires immediate attention.`);
       setIsAITagging(false);
-    }, 2500);
+    };
+
+    if (!API_BASE) {
+      applyFallback();
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/api/ai/report-analysis`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageDataUrl }),
+      });
+
+      if (!response.ok) {
+        applyFallback();
+        return;
+      }
+
+      const data = (await response.json()) as { category?: string; description?: string };
+      const detectedCategory = AI_CATEGORIES.includes((data.category || '') as (typeof AI_CATEGORIES)[number])
+        ? (data.category as (typeof AI_CATEGORIES)[number])
+        : fallbackCategoryFromImage(imageDataUrl);
+
+      setCategory(detectedCategory);
+      setDescription(
+        String(data.description || '').trim() ||
+          `AI-assisted: Potential ${detectedCategory.split('(')[0].trim()} spotted in the image. Requires immediate attention.`,
+      );
+      setIsAITagging(false);
+    } catch {
+      applyFallback();
+    }
   };
 
   const handleGetLocation = () => {
@@ -119,8 +163,9 @@ export function ReportIssue() {
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setImagePreview(reader.result as string);
-        triggerAITagging(); 
+        const nextPreview = reader.result as string;
+        setImagePreview(nextPreview);
+        void triggerAITagging(nextPreview);
       };
       reader.readAsDataURL(file);
     }

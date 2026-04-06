@@ -1,5 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
+import { GoogleGenAI } from '@google/genai';
+import dotenv from 'dotenv';
 import type { Request, Response } from 'express';
+
+dotenv.config({ path: '.env.local' });
+dotenv.config();
 
 type ReportStatus = 'Open' | 'In Progress' | 'Resolved';
 
@@ -92,6 +97,44 @@ const IMPACT_FACTORS = {
   WASTE_COLLECTED_PER_CLEANUP_HOUR_KG: 1.48,
 } as const;
 
+const REPORT_CATEGORIES = [
+  'Water Leakage (SDG 6)',
+  'Illegal Dumping (SDG 11)',
+  'Polluted Water Body (SDG 6)',
+  'Damaged Green Infrastructure (SDG 13)',
+] as const;
+
+type ReportCategory = (typeof REPORT_CATEGORIES)[number];
+
+const extractDataUrlPayload = (value: string) => {
+  const match = value.match(/^data:(.+?);base64,(.+)$/);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    mimeType: match[1],
+    base64Data: match[2],
+  };
+};
+
+const parseModelJson = (raw: string): Record<string, unknown> | null => {
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    const fallbackMatch = raw.match(/\{[\s\S]*\}/);
+    if (!fallbackMatch) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(fallbackMatch[0]) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+};
+
 const defaultState: AppState = {
   points: 0,
   graphData: defaultWeeklyGraphData.map((item) => ({ ...item })),
@@ -141,6 +184,8 @@ async function startServer() {
 
   const crypto = await import('crypto');
   const hashPassword = (password: string) => crypto.createHash('sha256').update(password).digest('hex');
+  const geminiApiKey = process.env.GEMINI_API_KEY?.trim() || '';
+  const geminiClient = geminiApiKey ? new GoogleGenAI({ apiKey: geminiApiKey }) : null;
 
   const readStateSnapshot = async (): Promise<StateRow> => {
     const { data, error } = await supabase.from('app_state').select('state,updated_at').eq('id', STATE_ROW_ID).maybeSingle();
@@ -218,7 +263,7 @@ async function startServer() {
     next();
   }
 
-  app.use(express.json());
+  app.use(express.json({ limit: '10mb' }));
   app.use(corsMiddleware);
 
   app.get('/api/status', (_req: Request, res: Response) => {
@@ -476,6 +521,67 @@ async function startServer() {
       res.status(201).json(report);
     } catch (error) {
       handleStorageError(res, error);
+    }
+  });
+
+  app.post('/api/ai/report-analysis', async (req: Request, res: Response) => {
+    const { imageDataUrl } = req.body as { imageDataUrl?: string };
+    if (!imageDataUrl || typeof imageDataUrl !== 'string') {
+      return res.status(400).json({ message: 'imageDataUrl is required.' });
+    }
+
+    const imagePayload = extractDataUrlPayload(imageDataUrl);
+    if (!imagePayload) {
+      return res.status(400).json({ message: 'Invalid image data format. Use a base64 data URL.' });
+    }
+
+    if (!geminiClient) {
+      return res.status(503).json({ message: 'Gemini API key is not configured on the backend.' });
+    }
+
+    const prompt = [
+      'You are classifying a civic/environmental issue from an image.',
+      `Choose one category only from: ${REPORT_CATEGORIES.join(', ')}.`,
+      'Return strict JSON only with keys: category, description.',
+      'description must be 1-2 concise sentences for a municipal issue report.',
+    ].join(' ');
+
+    try {
+      const response = await geminiClient.models.generateContent({
+        model: 'gemini-2.0-flash',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { text: prompt },
+              {
+                inlineData: {
+                  mimeType: imagePayload.mimeType,
+                  data: imagePayload.base64Data,
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      const modelOutput = response.text?.trim() || '{}';
+      const parsed = parseModelJson(modelOutput);
+      if (!parsed) {
+        return res.status(502).json({ message: 'Gemini returned an invalid response format.' });
+      }
+
+      const rawCategory = String(parsed.category || '').trim() as ReportCategory;
+      const category = REPORT_CATEGORIES.includes(rawCategory)
+        ? rawCategory
+        : 'Damaged Green Infrastructure (SDG 13)';
+      const fallbackDescription = `Potential ${category.split('(')[0].trim()} identified in the uploaded image. Please verify severity on-site.`;
+      const description = String(parsed.description || '').trim() || fallbackDescription;
+
+      res.json({ category, description });
+    } catch (error) {
+      console.error('Gemini analysis error:', error);
+      res.status(500).json({ message: 'Failed to analyze image with Gemini.' });
     }
   });
 
