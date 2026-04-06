@@ -541,9 +541,11 @@ async function startServer() {
 
     const prompt = [
       'You are classifying a civic/environmental issue from an image.',
+      'Describe what is visibly in the image and provide useful report-ready context.',
       `Choose one category only from: ${REPORT_CATEGORIES.join(', ')}.`,
-      'Return strict JSON only with keys: category, description.',
+      'Return strict JSON only with keys: category, description, additionalDetails.',
       'description must be 1-2 concise sentences for a municipal issue report.',
+      'additionalDetails must add 1-3 concise sentences with visible clues, likely cause, and urgency.',
     ].join(' ');
 
     try {
@@ -577,8 +579,11 @@ async function startServer() {
         : 'Damaged Green Infrastructure (SDG 13)';
       const fallbackDescription = `Potential ${category.split('(')[0].trim()} identified in the uploaded image. Please verify severity on-site.`;
       const description = String(parsed.description || '').trim() || fallbackDescription;
+      const additionalDetails =
+        String(parsed.additionalDetails || '').trim() ||
+        'No extra visual details were returned by the model. Please review the image manually for context.';
 
-      res.json({ category, description });
+      res.json({ category, description, additionalDetails });
     } catch (error) {
       console.error('Gemini analysis error:', error);
       res.status(500).json({ message: 'Failed to analyze image with Gemini.' });

@@ -95,10 +95,20 @@ export function ReportIssue() {
   const triggerAITagging = async (imageDataUrl: string) => {
     setIsAITagging(true);
 
+    const buildAnalysisText = (summary: string, additionalDetails: string) => {
+      const parts = [summary.trim(), additionalDetails.trim()].filter(Boolean);
+      return parts.join('\n\n');
+    };
+
     const applyFallback = () => {
       const detectedCategory = fallbackCategoryFromImage(imageDataUrl);
       setCategory(detectedCategory);
-      setDescription(`AI-assisted fallback: Potential ${detectedCategory.split('(')[0].trim()} spotted in the image. Requires immediate attention.`);
+      setDescription(
+        buildAnalysisText(
+          `AI-assisted fallback: Potential ${detectedCategory.split('(')[0].trim()} spotted in the image.`,
+          'Additional details were unavailable from the AI service, so please review the image manually for nearby damage, obstruction, or safety risks.',
+        ),
+      );
       setIsAITagging(false);
     };
 
@@ -119,15 +129,18 @@ export function ReportIssue() {
         return;
       }
 
-      const data = (await response.json()) as { category?: string; description?: string };
+      const data = (await response.json()) as { category?: string; description?: string; additionalDetails?: string };
       const detectedCategory = AI_CATEGORIES.includes((data.category || '') as (typeof AI_CATEGORIES)[number])
         ? (data.category as (typeof AI_CATEGORIES)[number])
         : fallbackCategoryFromImage(imageDataUrl);
 
       setCategory(detectedCategory);
       setDescription(
-        String(data.description || '').trim() ||
-          `AI-assisted: Potential ${detectedCategory.split('(')[0].trim()} spotted in the image. Requires immediate attention.`,
+        buildAnalysisText(
+          String(data.description || '').trim() ||
+            `AI-assisted: Potential ${detectedCategory.split('(')[0].trim()} spotted in the image.`,
+          String(data.additionalDetails || '').trim(),
+        ),
       );
       setIsAITagging(false);
     } catch {
