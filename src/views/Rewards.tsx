@@ -41,10 +41,6 @@ type AdoptionStatusResponse = {
   passiveRatePerHour?: number;
 };
 
-const CHALLENGE_FACTORS = {
-  BUCKET_BATH_DAILY_WATER_LITERS: 31,
-} as const;
-
 interface RewardsProps {
   user: AuthUser | null;
 }
@@ -226,9 +222,40 @@ export function Rewards({ user }: RewardsProps) {
     }
   };
 
-  const bucketBathProgress = Math.min(7, Math.floor(waterSaved / CHALLENGE_FACTORS.BUCKET_BATH_DAILY_WATER_LITERS));
   const transitTrailblazerProgress = Math.min(5, transitDays);
+  const waterSaverProgress = Math.min(120, Math.floor(waterSaved));
+  const territoryStewardProgress = adoptionStatus?.hasAdoption && adoptionStatus?.aura === 'green' ? 1 : 0;
   const selectedZone = adoptionZones.find((zone) => zone.id === selectedZoneId) || null;
+
+  const activeChallenges = [
+    {
+      key: 'transitTrailblazer',
+      title: 'Transit Trailblazer (SDG 11)',
+      progress: transitTrailblazerProgress,
+      total: 5,
+      reward: 250,
+      unitLabel: 'Days',
+      delay: 0.7,
+    },
+    {
+      key: 'waterSaverSprint',
+      title: 'Water Saver Sprint (SDG 6)',
+      progress: waterSaverProgress,
+      total: 120,
+      reward: 220,
+      unitLabel: 'Liters',
+      delay: 0.8,
+    },
+    {
+      key: 'territorySteward',
+      title: 'Territory Steward (SDG 13)',
+      progress: territoryStewardProgress,
+      total: 1,
+      reward: 320,
+      unitLabel: 'Zone',
+      delay: 0.9,
+    },
+  ] as const;
 
   // ADDED: Redeem Logic
   const handleRedeem = (cost: number, rewardName: string) => {
@@ -242,14 +269,21 @@ export function Rewards({ user }: RewardsProps) {
     }
   };
 
-  const handleValidateChallenge = (challengeKey: string, progress: number, total: number, reward: number, challengeName: string) => {
+  const handleValidateChallenge = (
+    challengeKey: string,
+    progress: number,
+    total: number,
+    reward: number,
+    challengeName: string,
+    unitLabel: string,
+  ) => {
     if (validatedChallenges[challengeKey]) {
       alert(`Challenge already validated: ${challengeName}.`);
       return;
     }
 
     if (progress < total) {
-      alert(`You can validate \"${challengeName}\" after completing ${total} days.`);
+      alert(`You can validate \"${challengeName}\" after reaching ${total} ${unitLabel.toLowerCase()}.`);
       return;
     }
 
@@ -361,24 +395,28 @@ export function Rewards({ user }: RewardsProps) {
           Active Challenges
         </motion.h3>
         <div className="space-y-4">
-          <ChallengeCard 
-            title="The 7-Day Bucket Bath (SDG 6)"
-            progress={bucketBathProgress}
-            total={7}
-            reward={300}
-            delay={0.7}
-            isValidated={Boolean(validatedChallenges.bucketBath)}
-            onValidate={() => handleValidateChallenge('bucketBath', bucketBathProgress, 7, 300, 'The 7-Day Bucket Bath')}
-          />
-          <ChallengeCard 
-            title="Transit Trailblazer (SDG 11)"
-            progress={transitTrailblazerProgress}
-            total={5}
-            reward={250}
-            delay={0.8}
-            isValidated={Boolean(validatedChallenges.transitTrailblazer)}
-            onValidate={() => handleValidateChallenge('transitTrailblazer', transitTrailblazerProgress, 5, 250, 'Transit Trailblazer')}
-          />
+          {activeChallenges.map((challenge) => (
+            <ChallengeCard
+              key={challenge.key}
+              title={challenge.title}
+              progress={challenge.progress}
+              total={challenge.total}
+              reward={challenge.reward}
+              unitLabel={challenge.unitLabel}
+              delay={challenge.delay}
+              isValidated={Boolean(validatedChallenges[challenge.key])}
+              onValidate={() =>
+                handleValidateChallenge(
+                  challenge.key,
+                  challenge.progress,
+                  challenge.total,
+                  challenge.reward,
+                  challenge.title,
+                  challenge.unitLabel,
+                )
+              }
+            />
+          ))}
         </div>
 
         <motion.h3
@@ -516,8 +554,8 @@ function RewardCard({ icon: Icon, title, description, cost, color, iconColor, de
   );
 }
 
-function ChallengeCard({ title, progress, total, reward, delay = 0, onValidate, isValidated }: any) {
-  const percentage = (progress / total) * 100;
+function ChallengeCard({ title, progress, total, reward, unitLabel = 'Days', delay = 0, onValidate, isValidated }: any) {
+  const percentage = total > 0 ? (progress / total) * 100 : 0;
   const isCompleted = progress >= total;
   const canValidate = isCompleted && !isValidated;
 
@@ -531,7 +569,7 @@ function ChallengeCard({ title, progress, total, reward, delay = 0, onValidate, 
       <div className="flex-1 w-full">
         <div className="flex justify-between items-end mb-2">
           <h4 className="font-medium text-lg text-white">{title}</h4>
-          <span className="text-sm font-bold text-white/70">{progress}/{total} Days</span>
+          <span className="text-sm font-bold text-white/70">{progress}/{total} {unitLabel}</span>
         </div>
         <div className="h-3 w-full bg-[#1A050C] rounded-full overflow-hidden border border-[#D4AF37]/10">
           <div 
