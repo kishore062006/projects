@@ -55,6 +55,7 @@ export function Rewards({ user }: RewardsProps) {
   const [adoptionStatus, setAdoptionStatus] = useState<AdoptionStatusResponse | null>(null);
   const [isAdoptionBusy, setIsAdoptionBusy] = useState(false);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+  const isHost = user?.role === 'admin' || String(user?.email || '').toLowerCase() === 'main@gmail.com';
 
   const countTransitLogs = (actions: Array<{ type?: string; title?: string }>) => {
     return actions.filter((action) => {
@@ -236,6 +237,35 @@ export function Rewards({ user }: RewardsProps) {
       alert(data.message || 'Adoption released.');
     } catch {
       alert('Unable to release your zone.');
+    } finally {
+      setIsAdoptionBusy(false);
+    }
+  };
+
+  const handleForceReleaseZone = async (ownerUserId: string, zoneName: string) => {
+    if (!API_BASE || !ownerUserId || isAdoptionBusy || !isHost) return;
+
+    const confirmed = window.confirm(`Force release \"${zoneName}\" from user ${ownerUserId}?`);
+    if (!confirmed) return;
+
+    setIsAdoptionBusy(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/adoptions/release`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: ownerUserId }),
+      });
+
+      const data = (await response.json()) as { message?: string };
+      if (!response.ok) {
+        alert(data.message || 'Unable to force release this zone.');
+        return;
+      }
+
+      await refreshAdoptionData();
+      alert(`Force release successful for ${zoneName}.`);
+    } catch {
+      alert('Unable to force release this zone right now.');
     } finally {
       setIsAdoptionBusy(false);
     }
@@ -540,6 +570,16 @@ export function Rewards({ user }: RewardsProps) {
                     ? 'Adopted By Another User'
                     : 'Adopt This Zone'}
                 </button>
+
+                {isHost && isTakenByOther && zone.adoptedByUserId && (
+                  <button
+                    onClick={() => handleForceReleaseZone(zone.adoptedByUserId as string, zone.name)}
+                    disabled={isAdoptionBusy}
+                    className="mt-2 w-full py-2 rounded-xl bg-red-500/20 border border-red-400/35 text-red-100 font-semibold hover:bg-red-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Force Release (Host)
+                  </button>
+                )}
               </div>
             );
           })}
