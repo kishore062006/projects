@@ -28,6 +28,17 @@ Required environment variables for the backend:
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 
+Email verification and forgot-password (recommended):
+
+- `APP_BASE_URL` (frontend URL used in email links, e.g. `http://localhost:3000` or your deployed site URL)
+- `SMTP_HOST`
+- `SMTP_PORT` (typically `587` or `465`)
+- `SMTP_USER`
+- `SMTP_PASS`
+- `SMTP_FROM` (sender email)
+
+If SMTP is not configured, account creation still works but verification/reset emails cannot be delivered.
+
 Create this table in Supabase first:
 
 ```sql
