@@ -66,6 +66,9 @@ const getPriorityBadgeClass = (priority: string) => {
 };
 
 export function AuthorityPortal() {
+  const currentUser = JSON.parse(localStorage.getItem('ecoSyncUser') || 'null') as { id?: string; role?: string } | null;
+  const requesterId = String(currentUser?.id || '');
+  const requesterRole = String(currentUser?.role || '');
   const [issues, setIssues] = useState<any[]>([]);
   const [selectedIssue, setSelectedIssue] = useState<any | null>(null);
   // ADDED: View mode state
@@ -75,7 +78,9 @@ export function AuthorityPortal() {
     const loadIssues = async () => {
       if (API_BASE) {
         try {
-          const response = await fetch(`${API_BASE}/api/reports`);
+          const response = await fetch(
+            `${API_BASE}/api/reports?userId=${encodeURIComponent(requesterId)}&role=${encodeURIComponent(requesterRole)}`,
+          );
           if (response.ok) {
             const data = await response.json();
             if (Array.isArray(data)) {
@@ -111,6 +116,8 @@ export function AuthorityPortal() {
       try {
         const response = await fetch(`${API_BASE}/api/reports/${id}/resolve`, {
           method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: requesterRole }),
         });
 
         if (response.ok) {

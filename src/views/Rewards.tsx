@@ -51,10 +51,12 @@ export function Rewards({ user }: RewardsProps) {
     }
 
     const loadDynamicChallengeData = async () => {
-      if (!API_BASE) return;
+      if (!API_BASE || !user?.id) return;
 
       try {
-        const dashboardResponse = await fetch(`${API_BASE}/api/dashboard`);
+        const dashboardResponse = await fetch(
+          `${API_BASE}/api/dashboard?userId=${encodeURIComponent(user.id)}&role=${encodeURIComponent(user.role)}`,
+        );
         if (dashboardResponse.ok) {
           const dashboardData = (await dashboardResponse.json()) as DashboardResponse;
           const nextBalance = Number(dashboardData?.points || 0);
@@ -70,8 +72,6 @@ export function Rewards({ user }: RewardsProps) {
       } catch {
         // Keep local fallback values.
       }
-
-      if (!user?.id) return;
 
       try {
         const metricsResponse = await fetch(`${API_BASE}/api/users/${user.id}/metrics`);

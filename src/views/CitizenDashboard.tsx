@@ -83,8 +83,11 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
     if (savedWaste) setWasteReduced(parseFloat(savedWaste));
 
     const savedReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]');
-    const resolved = savedReports.filter((report: any) => report.status === 'Resolved').length;
-    const pending = savedReports.filter((report: any) => report.status !== 'Resolved').length;
+    const scopedReports = user?.id
+      ? savedReports.filter((report: any) => String(report?.ownerUserId || '') === user.id)
+      : [];
+    const resolved = scopedReports.filter((report: any) => report.status === 'Resolved').length;
+    const pending = scopedReports.filter((report: any) => report.status !== 'Resolved').length;
     
     setResolvedCount(resolved);
     setPendingCount(pending);
@@ -93,10 +96,12 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
     if (savedGraph) setGraphData(normalizeGraphData(savedGraph));
 
     const loadDashboard = async () => {
-      if (!API_BASE) return;
+      if (!API_BASE || !user?.id) return;
 
       try {
-        const response = await fetch(`${API_BASE}/api/dashboard`);
+        const response = await fetch(
+          `${API_BASE}/api/dashboard?userId=${encodeURIComponent(user.id)}&role=${encodeURIComponent(user.role)}`,
+        );
         if (!response.ok) return;
         const data = (await response.json()) as DashboardResponse;
 
@@ -210,13 +215,13 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
     };
 
     const syncAction = async () => {
-      if (!API_BASE) return;
+      if (!API_BASE || !user?.id) return;
 
       try {
         await fetch(`${API_BASE}/api/actions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title, points, type: categoryId }),
+          body: JSON.stringify({ title, points, type: categoryId, userId: user.id }),
         });
       } catch {
         // Local fallback already applied.
@@ -242,13 +247,13 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
     localStorage.setItem('ecoGraphData', JSON.stringify(updatedGraphData));
 
     const syncGraph = async () => {
-      if (!API_BASE) return;
+      if (!API_BASE || !user?.id) return;
 
       try {
         await fetch(`${API_BASE}/api/graph`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ day: walkDay, carbon: carbonSaved }),
+          body: JSON.stringify({ day: walkDay, carbon: carbonSaved, userId: user.id }),
         });
       } catch {
         // Local fallback already applied.

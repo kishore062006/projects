@@ -13,6 +13,7 @@ type Report = {
   type: string;
   location: string;
   address?: string;
+  ownerUserId?: string;
   status: ReportStatus;
   priority: string;
   time: string;
@@ -28,6 +29,13 @@ type Action = {
   time: string;
   points: number;
   type: string;
+  userId?: string;
+};
+
+type UserDashboardState = {
+  points: number;
+  graphData: Array<{ name: string; carbon: number }>;
+  actions: Action[];
 };
 
 type Reward = {
@@ -68,6 +76,7 @@ type AppState = {
   modules: ModuleItem[];
   users: User[];
   userMetrics: Record<string, UserMetrics>;
+  userDashboards: Record<string, UserDashboardState>;
 };
 
 const LEADERSHIP_EMAILS = new Set(['main@gmail.com']);
@@ -191,6 +200,7 @@ const defaultState: AppState = {
   modules: [],
   users: [],
   userMetrics: {},
+  userDashboards: {},
 };
 
 const cloneState = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -207,7 +217,17 @@ const normalizeState = (state?: Partial<AppState> | null): AppState => ({
   modules: state?.modules ?? cloneState(defaultState.modules),
   users: state?.users ?? cloneState(defaultState.users),
   userMetrics: state?.userMetrics ?? cloneState(defaultState.userMetrics),
+  userDashboards: state?.userDashboards ?? cloneState(defaultState.userDashboards),
 });
+
+const createDefaultUserDashboard = (): UserDashboardState => ({
+  points: 0,
+  graphData: defaultWeeklyGraphData.map((item) => ({ ...item })),
+  actions: [],
+});
+
+const getOrCreateUserDashboard = (state: AppState, userId: string): UserDashboardState =>
+  state.userDashboards[userId] ?? createDefaultUserDashboard();
 
 async function startServer() {
   const expressModule = await import('express');
@@ -336,9 +356,14 @@ async function startServer() {
   });
 
   app.get('/api/actions', async (_req: Request, res: Response) => {
+    const userId = String(_req.query.userId || '').trim();
     try {
       const state = await readState();
-      res.json(state.actions.slice(0, 20));
+      if (!userId) {
+        return res.json([]);
+      }
+      const dashboard = getOrCreateUserDashboard(state, userId);
+      res.json(dashboard.actions.slice(0, 20));
     } catch (error) {
       handleStorageError(res, error);
     }
@@ -488,9 +513,9 @@ async function startServer() {
   });
 
   app.post('/api/actions', async (req: Request, res: Response) => {
-    const { title, points, type } = req.body;
-    if (!title || typeof points !== 'number') {
-      return res.status(400).json({ message: 'Invalid action payload.' });
+    const { title, points, type, userId } = req.body;
+    if (!title || typeof points !== 'number' || !userId) {
+      return res.status(400).json({ message: 'Invalid action payload. userId is required.' });
     }
 
     try {
@@ -500,16 +525,29 @@ async function startServer() {
         time: 'Just now',
         points,
         type: type || 'user-logged',
+        userId: String(userId),
       };
 
-      await mutateState((state) => ({
-        nextState: {
-          ...state,
-          actions: [action, ...state.actions],
-          points: state.points + points,
-        },
-        result: null,
-      }));
+      await mutateState((state) => {
+        const targetUserId = String(userId);
+        const dashboard = getOrCreateUserDashboard(state, targetUserId);
+        const nextDashboard: UserDashboardState = {
+          ...dashboard,
+          points: dashboard.points + points,
+          actions: [action, ...dashboard.actions],
+        };
+
+        return {
+          nextState: {
+            ...state,
+            userDashboards: {
+              ...state.userDashboards,
+              [targetUserId]: nextDashboard,
+            },
+          },
+          result: null,
+        };
+      });
 
       res.status(201).json(action);
     } catch (error) {
@@ -517,18 +555,29 @@ async function startServer() {
     }
   });
 
-  app.get('/api/reports', async (_req: Request, res: Response) => {
+  app.get('/api/reports', async (req: Request, res: Response) => {
+    const requesterUserId = String(req.query.userId || '').trim();
+    const requesterRole = String(req.query.role || '').trim().toLowerCase();
     try {
       const state = await readState();
-      res.json(state.reports);
+      if (requesterRole === 'admin') {
+        return res.json(state.reports);
+      }
+
+      if (!requesterUserId) {
+        return res.json([]);
+      }
+
+      const filteredReports = state.reports.filter((report) => String(report.ownerUserId || '') === requesterUserId);
+      res.json(filteredReports);
     } catch (error) {
       handleStorageError(res, error);
     }
   });
 
   app.post('/api/reports', async (req: Request, res: Response) => {
-    const { type, location, address, priority, reporter, description, image } = req.body;
-    if (!type || !location || !reporter || !description) {
+    const { type, location, address, priority, reporter, description, image, userId } = req.body;
+    if (!type || !location || !reporter || !description || !userId) {
       return res.status(400).json({ message: 'Missing required report fields.' });
     }
 
@@ -539,6 +588,7 @@ async function startServer() {
         type,
         location,
         address: address ? String(address).trim() : '',
+        ownerUserId: String(userId),
         priority: priority || 'High',
         status: 'Open',
         time: 'Just now',
@@ -549,9 +599,15 @@ async function startServer() {
       };
 
       await mutateState((state) => {
+        const targetUserId = String(userId);
+        const dashboard = getOrCreateUserDashboard(state, targetUserId);
+
         const nextCoords = parseCoordinates(report.location);
         if (nextCoords) {
           const hasDuplicate = state.reports.some((existingReport) => {
+            if (String(existingReport.ownerUserId || '') !== targetUserId) {
+              return false;
+            }
             const existingCoords = parseCoordinates(existingReport.location);
             if (!existingCoords) {
               return false;
@@ -568,17 +624,24 @@ async function startServer() {
           nextState: {
             ...state,
             reports: [report, ...state.reports],
-            actions: [
-              {
-                id: Date.now() + 1,
-                title: `Reported ${type}`,
-                time: 'Just now',
-                points: 50,
-                type: 'report',
+            userDashboards: {
+              ...state.userDashboards,
+              [targetUserId]: {
+                ...dashboard,
+                points: dashboard.points + 50,
+                actions: [
+                  {
+                    id: Date.now() + 1,
+                    title: `Reported ${type}`,
+                    time: 'Just now',
+                    points: 50,
+                    type: 'report',
+                    userId: targetUserId,
+                  },
+                  ...dashboard.actions,
+                ],
               },
-              ...state.actions,
-            ],
-            points: state.points + 50,
+            },
           },
           result: null,
         };
@@ -661,6 +724,10 @@ async function startServer() {
 
   app.patch('/api/reports/:id/resolve', async (req: Request, res: Response) => {
     const { id } = req.params;
+    const role = String(req.query.role || req.body?.role || '').toLowerCase();
+    if (role !== 'admin') {
+      return res.status(403).json({ message: 'Only leaders can resolve reports.' });
+    }
 
     try {
       const resolvedReport = await mutateState((state) => {
@@ -673,21 +740,34 @@ async function startServer() {
         const reports = [...state.reports];
         reports[reportIndex] = report;
 
+        const reporterUserId = String(report.ownerUserId || '');
+        const dashboard = reporterUserId ? getOrCreateUserDashboard(state, reporterUserId) : null;
+
         return {
           nextState: {
             ...state,
             reports,
-            points: state.points + 150,
-            actions: [
-              {
-                id: Date.now() + 2,
-                title: `Resolved ${report.type}`,
-                time: 'Just now',
-                points: 150,
-                type: 'resolution',
-              },
-              ...state.actions,
-            ],
+            userDashboards:
+              reporterUserId && dashboard
+                ? {
+                    ...state.userDashboards,
+                    [reporterUserId]: {
+                      ...dashboard,
+                      points: dashboard.points + 150,
+                      actions: [
+                        {
+                          id: Date.now() + 2,
+                          title: `Resolved ${report.type}`,
+                          time: 'Just now',
+                          points: 150,
+                          type: 'resolution',
+                          userId: reporterUserId,
+                        },
+                        ...dashboard.actions,
+                      ],
+                    },
+                  }
+                : state.userDashboards,
           },
           result: report,
         };
@@ -751,21 +831,28 @@ async function startServer() {
   });
 
   app.get('/api/dashboard', async (_req: Request, res: Response) => {
+    const userId = String(_req.query.userId || '').trim();
+    const role = String(_req.query.role || '').toLowerCase();
     try {
       const state = await readState();
-      const resolvedCount = state.reports.filter((report) => report.status === 'Resolved').length;
-      const pendingCount = state.reports.filter((report) => report.status !== 'Resolved').length;
-      const totalCarbon = state.graphData.reduce((sum, item) => sum + item.carbon, 0);
-      const rankImprovement = resolvedCount * 2 + Math.floor((state.points - 2450) / 50);
+      const dashboard = userId ? getOrCreateUserDashboard(state, userId) : createDefaultUserDashboard();
+      const visibleReports =
+        role === 'admin'
+          ? state.reports
+          : state.reports.filter((report) => String(report.ownerUserId || '') === userId);
+      const resolvedCount = visibleReports.filter((report) => report.status === 'Resolved').length;
+      const pendingCount = visibleReports.filter((report) => report.status !== 'Resolved').length;
+      const totalCarbon = dashboard.graphData.reduce((sum, item) => sum + item.carbon, 0);
+      const rankImprovement = resolvedCount * 2 + Math.floor((dashboard.points - 2450) / 50);
       const currentRank = Math.max(1, 15 - rankImprovement);
       const rankTrend = Math.max(1, rankImprovement);
 
       res.json({
-        points: state.points,
+        points: dashboard.points,
         resolvedCount,
         pendingCount,
-        graphData: state.graphData,
-        recentActions: state.actions.slice(0, 5),
+        graphData: dashboard.graphData,
+        recentActions: dashboard.actions.slice(0, 5),
         totalCarbon,
         currentRank,
         rankTrend,
@@ -776,30 +863,50 @@ async function startServer() {
   });
 
   app.post('/api/graph', async (req: Request, res: Response) => {
-    const { day, carbon } = req.body;
-    if (!day || typeof carbon !== 'number') {
-      return res.status(400).json({ message: 'Invalid graph payload.' });
+    const { day, carbon, userId } = req.body;
+    if (!day || typeof carbon !== 'number' || !userId) {
+      return res.status(400).json({ message: 'Invalid graph payload. userId is required.' });
     }
 
     try {
       const graphEntry = await mutateState((state) => {
-        const itemIndex = state.graphData.findIndex((entry) => entry.name === day);
+        const targetUserId = String(userId);
+        const dashboard = getOrCreateUserDashboard(state, targetUserId);
+        const itemIndex = dashboard.graphData.findIndex((entry) => entry.name === day);
         if (itemIndex === -1) {
-          const graphData = [...state.graphData, { name: String(day), carbon: Number(carbon.toFixed(1)) }];
+          const graphData = [...dashboard.graphData, { name: String(day), carbon: Number(carbon.toFixed(1)) }];
           return {
-            nextState: { ...state, graphData },
+            nextState: {
+              ...state,
+              userDashboards: {
+                ...state.userDashboards,
+                [targetUserId]: {
+                  ...dashboard,
+                  graphData,
+                },
+              },
+            },
             result: graphData[graphData.length - 1],
           };
         }
 
-        const graphData = [...state.graphData];
+        const graphData = [...dashboard.graphData];
         graphData[itemIndex] = {
           ...graphData[itemIndex],
           carbon: Number((graphData[itemIndex].carbon + carbon).toFixed(1)),
         };
 
         return {
-          nextState: { ...state, graphData },
+          nextState: {
+            ...state,
+            userDashboards: {
+              ...state.userDashboards,
+              [targetUserId]: {
+                ...dashboard,
+                graphData,
+              },
+            },
+          },
           result: graphData[itemIndex],
         };
       });

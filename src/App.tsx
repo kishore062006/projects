@@ -38,6 +38,9 @@ export default function App() {
   const handleSignOut = () => {
     setUser(null);
     localStorage.removeItem('ecoSyncUser');
+    Object.keys(localStorage)
+      .filter((key) => key.startsWith('eco'))
+      .forEach((key) => localStorage.removeItem(key));
   };
 
   const renderView = () => {

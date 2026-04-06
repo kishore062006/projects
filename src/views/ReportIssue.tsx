@@ -291,6 +291,7 @@ export function ReportIssue({ user }: ReportIssueProps) {
     const reporterName = user?.name?.trim() || user?.email?.trim() || 'Anonymous Reporter';
     
     const reportData = {
+      userId: user?.id || '',
       type: category.split(' (')[0],
       priority: categoryPriorityMap[category as (typeof AI_CATEGORIES)[number]] || 'High',
       reporter: reporterName,
@@ -303,7 +304,7 @@ export function ReportIssue({ user }: ReportIssueProps) {
     try {
       const nextCoords = parseLocationInput(location);
       let savedToBackend = false;
-      if (API_BASE) {
+      if (API_BASE && user?.id) {
         const response = await fetch(`${API_BASE}/api/reports`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -321,9 +322,11 @@ export function ReportIssue({ user }: ReportIssueProps) {
       }
 
       if (!savedToBackend) {
-        const existingReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]') as Array<{ location?: string }>;
+        const existingReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]') as Array<{ location?: string; ownerUserId?: string }>;
+        const currentUserId = user?.id || '';
+        const currentUserReports = existingReports.filter((report) => String(report.ownerUserId || '') === currentUserId);
         if (nextCoords) {
-          const hasDuplicate = existingReports.some((report) => {
+          const hasDuplicate = currentUserReports.some((report) => {
             const existingCoords = parseLocationInput(String(report?.location || ''));
             if (!existingCoords) {
               return false;
@@ -342,6 +345,7 @@ export function ReportIssue({ user }: ReportIssueProps) {
         const reportToStore = {
           id: `TKT-${Math.floor(Math.random() * 10000)}`,
           ...reportData,
+          ownerUserId: currentUserId,
           status: 'Open',
           time: 'Just now',
           timestamp: new Date().toISOString(),
