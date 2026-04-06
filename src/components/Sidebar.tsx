@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LayoutDashboard, AlertTriangle, BookOpen, Gift, ShieldAlert, Leaf } from 'lucide-react';
+import { LayoutDashboard, AlertTriangle, BookOpen, Gift, ShieldAlert, Leaf, PhoneCall } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { API_BASE } from '../lib/api';
 
@@ -52,6 +52,7 @@ export function Sidebar({ currentView, setCurrentView, user, onSignOut }: Sideba
   const navItems = [
     { id: 'dashboard', label: 'My Impact', icon: LayoutDashboard },
     { id: 'report', label: 'Report Issue', icon: AlertTriangle },
+    { id: 'helplines', label: 'Helplines', icon: PhoneCall },
     { id: 'learn', label: 'Learn', icon: BookOpen },
     { id: 'rewards', label: 'Rewards', icon: Gift },
     ...(isLeader ? [{ id: 'authority', label: 'Authority Portal', icon: ShieldAlert }] : []),
