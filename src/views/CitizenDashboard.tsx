@@ -99,6 +99,7 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
   const [isWalkStarting, setIsWalkStarting] = useState(false);
   const [isWalkStopping, setIsWalkStopping] = useState(false);
   const [isWalkTracking, setIsWalkTracking] = useState(false);
+  const [logActionError, setLogActionError] = useState('');
   
   const [recentActions, setRecentActions] = useState<any[]>([]);
   const [totalPoints, setTotalPoints] = useState(0);
@@ -451,6 +452,14 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
   };
 
   const handleLogAction = (categoryId: string, title: string, points: number, amount: number) => {
+    // Store previous state for potential rollback
+    const previousActions = recentActions;
+    const previousTotalPoints = totalPoints;
+    const previousWaterSaved = waterSaved;
+    const previousWasteReduced = wasteReduced;
+    
+    setLogActionError('');
+
     const newAction = {
       id: Date.now(),
       title,
@@ -499,7 +508,28 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
           body: JSON.stringify({ categoryId, amount }),
         });
 
-        if (!response.ok) return;
+        if (!response.ok) {
+          const errorData = (await response.json()) as { message?: string };
+          const errorMessage = errorData?.message || 'Unable to log impact. Please check your input.';
+          
+          // Revert optimistic UI updates
+          setRecentActions(previousActions);
+          setTotalPoints(previousTotalPoints);
+          setWaterSaved(previousWaterSaved);
+          setWasteReduced(previousWasteReduced);
+          
+          // Revert localStorage
+          localStorage.setItem('ecoActions', JSON.stringify(previousActions));
+          localStorage.setItem('ecoPoints', previousTotalPoints.toString());
+          localStorage.setItem('ecoWaterSaved', previousWaterSaved.toString());
+          localStorage.setItem('ecoWasteReduced', previousWasteReduced.toString());
+          
+          // Show error notification
+          setLogActionError(errorMessage);
+          alert(`⚠️ Daily Cap Exceeded\n\n${errorMessage}`);
+          return;
+        }
+        
         const data = await response.json();
         if (typeof data?.waterSaved === 'number') {
           setWaterSaved(data.waterSaved);
@@ -509,8 +539,10 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
           setWasteReduced(data.wasteReduced);
           localStorage.setItem('ecoWasteReduced', String(data.wasteReduced));
         }
-      } catch {
-        // Local fallback already applied above.
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Network error while logging impact';
+        setLogActionError(errorMsg);
+        alert(`❌ Error\n\n${errorMsg}`);
       }
     };
 
@@ -518,13 +550,21 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
       if (!API_BASE || !user?.id) return;
 
       try {
-        await fetch(`${API_BASE}/api/actions`, {
+        const response = await fetch(`${API_BASE}/api/actions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title, points, type: categoryId, userId: user.id }),
         });
-      } catch {
-        // Local fallback already applied.
+
+        if (!response.ok) {
+          const errorData = (await response.json()) as { message?: string };
+          const errorMessage = errorData?.message || 'Unable to record action';
+          setLogActionError(errorMessage);
+          alert(`⚠️ Action Not Recorded\n\n${errorMessage}`);
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Network error while recording action';
+        setLogActionError(errorMsg);
       }
     };
 
@@ -603,6 +643,16 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
               <Plus size={20} />
               Log Impact
             </button>
+            {logActionError && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="mt-2 p-3 bg-red-500/20 border border-red-500 text-red-200 rounded-lg text-sm"
+              >
+                ⚠️ {logActionError}
+              </motion.div>
+            )}
           </div>
         </motion.header>
 
@@ -804,7 +854,10 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
 
       <LogActionModal 
         isOpen={isLoggingAction} 
-        onClose={() => setIsLoggingAction(false)} 
+        onClose={() => {
+          setIsLoggingAction(false);
+          setLogActionError('');
+        }}
         onLogAction={handleLogAction}
       />
 
