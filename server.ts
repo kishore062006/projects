@@ -38,6 +38,23 @@ type UserDashboardState = {
   actions: Action[];
 };
 
+type AdoptionZone = {
+  id: string;
+  name: string;
+  type: 'park' | 'street' | 'lobby';
+  lat: number;
+  lng: number;
+  radiusKm: number;
+  adoptionCost: number;
+};
+
+type ZoneAdoption = {
+  userId: string;
+  zoneId: string;
+  adoptedAt: string;
+  lastPassiveAwardAt: string;
+};
+
 type Reward = {
   id: string;
   name: string;
@@ -77,6 +94,8 @@ type AppState = {
   users: User[];
   userMetrics: Record<string, UserMetrics>;
   userDashboards: Record<string, UserDashboardState>;
+  adoptionZones: AdoptionZone[];
+  zoneAdoptions: Record<string, ZoneAdoption>;
 };
 
 const LEADERSHIP_EMAILS = new Set(['main@gmail.com']);
@@ -116,6 +135,57 @@ const REPORT_CATEGORIES = [
   'Illegal Dumping (SDG 11)',
   'Polluted Water Body (SDG 6)',
   'Damaged Green Infrastructure (SDG 13)',
+] as const;
+
+const PASSIVE_POINTS_PER_HOUR = 20;
+const PASSIVE_AWARD_WINDOW_MS = 15 * 60 * 1000;
+
+const defaultAdoptionZones: AdoptionZone[] = [
+  {
+    id: 'zone-lalbagh',
+    name: 'Lalbagh Botanical Garden Perimeter',
+    type: 'park',
+    lat: 12.9507,
+    lng: 77.5848,
+    radiusKm: 0.7,
+    adoptionCost: 600,
+  },
+  {
+    id: 'zone-cubbon',
+    name: 'Cubbon Park Belt',
+    type: 'park',
+    lat: 12.9763,
+    lng: 77.5929,
+    radiusKm: 0.65,
+    adoptionCost: 650,
+  },
+  {
+    id: 'zone-mg-road',
+    name: 'MG Road Civic Stretch',
+    type: 'street',
+    lat: 12.9756,
+    lng: 77.6066,
+    radiusKm: 0.5,
+    adoptionCost: 550,
+  },
+  {
+    id: 'zone-indiranagar',
+    name: 'Indiranagar 100 Ft Road Block',
+    type: 'street',
+    lat: 12.9719,
+    lng: 77.6412,
+    radiusKm: 0.45,
+    adoptionCost: 500,
+  },
+  {
+    id: 'zone-ubcity',
+    name: 'UB City Lobby & Access Zone',
+    type: 'lobby',
+    lat: 12.9718,
+    lng: 77.5950,
+    radiusKm: 0.3,
+    adoptionCost: 450,
+  },
 ] as const;
 
 type ReportCategory = (typeof REPORT_CATEGORIES)[number];
@@ -191,6 +261,34 @@ const areSameCoordinates = (a: [number, number], b: [number, number]) => {
   return Math.abs(a[0] - b[0]) <= precisionThreshold && Math.abs(a[1] - b[1]) <= precisionThreshold;
 };
 
+const toRadians = (value: number) => (value * Math.PI) / 180;
+
+const distanceKm = (a: [number, number], b: [number, number]) => {
+  const earthRadiusKm = 6371;
+  const dLat = toRadians(b[0] - a[0]);
+  const dLng = toRadians(b[1] - a[1]);
+  const lat1 = toRadians(a[0]);
+  const lat2 = toRadians(b[0]);
+
+  const haversine =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLng / 2) * Math.sin(dLng / 2) * Math.cos(lat1) * Math.cos(lat2);
+  const centralAngle = 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+  return earthRadiusKm * centralAngle;
+};
+
+const getOpenIssueCountInZone = (state: AppState, zone: AdoptionZone) =>
+  state.reports.filter((report) => {
+    if (report.status === 'Resolved') {
+      return false;
+    }
+    const reportCoords = parseCoordinates(report.location);
+    if (!reportCoords) {
+      return false;
+    }
+    return distanceKm([zone.lat, zone.lng], reportCoords) <= zone.radiusKm;
+  }).length;
+
 const defaultState: AppState = {
   points: 0,
   graphData: defaultWeeklyGraphData.map((item) => ({ ...item })),
@@ -201,6 +299,8 @@ const defaultState: AppState = {
   users: [],
   userMetrics: {},
   userDashboards: {},
+  adoptionZones: defaultAdoptionZones.map((zone) => ({ ...zone })),
+  zoneAdoptions: {},
 };
 
 const cloneState = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -218,6 +318,11 @@ const normalizeState = (state?: Partial<AppState> | null): AppState => ({
   users: state?.users ?? cloneState(defaultState.users),
   userMetrics: state?.userMetrics ?? cloneState(defaultState.userMetrics),
   userDashboards: state?.userDashboards ?? cloneState(defaultState.userDashboards),
+  adoptionZones:
+    state?.adoptionZones && state.adoptionZones.length > 0
+      ? state.adoptionZones
+      : cloneState(defaultState.adoptionZones),
+  zoneAdoptions: state?.zoneAdoptions ?? cloneState(defaultState.zoneAdoptions),
 });
 
 const createDefaultUserDashboard = (): UserDashboardState => ({
@@ -652,6 +757,280 @@ async function startServer() {
       if (error instanceof Error && error.message === 'DUPLICATE_LOCATION') {
         return res.status(409).json({ message: 'This location has already been reported. Please ignore duplicate submissions.' });
       }
+      handleStorageError(res, error);
+    }
+  });
+
+  app.get('/api/adopt-zones', async (req: Request, res: Response) => {
+    const requesterUserId = String(req.query.userId || '').trim();
+    try {
+      const state = await readState();
+      const zones = state.adoptionZones.map((zone) => {
+        const openIssueCount = getOpenIssueCountInZone(state, zone);
+        const adoptedByUserId = Object.values(state.zoneAdoptions).find((adoption) => adoption.zoneId === zone.id)?.userId || null;
+        return {
+          ...zone,
+          openIssueCount,
+          health: openIssueCount === 0 ? 'healthy' : 'alert',
+          adoptedByUserId,
+          isOwnedByCurrentUser: requesterUserId ? adoptedByUserId === requesterUserId : false,
+        };
+      });
+
+      res.json(zones);
+    } catch (error) {
+      handleStorageError(res, error);
+    }
+  });
+
+  app.post('/api/adoptions/adopt', async (req: Request, res: Response) => {
+    const { userId, zoneId } = req.body;
+    if (!userId || !zoneId) {
+      return res.status(400).json({ message: 'userId and zoneId are required.' });
+    }
+
+    const targetUserId = String(userId).trim();
+    const targetZoneId = String(zoneId).trim();
+
+    try {
+      const result = await mutateState((state) => {
+        const zone = state.adoptionZones.find((item) => item.id === targetZoneId);
+        if (!zone) {
+          throw new Error('ZONE_NOT_FOUND');
+        }
+
+        const existingForUser = state.zoneAdoptions[targetUserId];
+        if (existingForUser) {
+          throw new Error('ALREADY_HAS_ZONE');
+        }
+
+        const existingOwner = Object.values(state.zoneAdoptions).find((adoption) => adoption.zoneId === targetZoneId);
+        if (existingOwner) {
+          throw new Error('ZONE_ALREADY_TAKEN');
+        }
+
+        const dashboard = getOrCreateUserDashboard(state, targetUserId);
+        if (dashboard.points < zone.adoptionCost) {
+          throw new Error('INSUFFICIENT_POINTS');
+        }
+
+        const nowIso = new Date().toISOString();
+        const nextDashboard: UserDashboardState = {
+          ...dashboard,
+          points: dashboard.points - zone.adoptionCost,
+          actions: [
+            {
+              id: Date.now() + 3,
+              title: `Adopted ${zone.name}`,
+              time: 'Just now',
+              points: -zone.adoptionCost,
+              type: 'adoption',
+              userId: targetUserId,
+            },
+            ...dashboard.actions,
+          ],
+        };
+
+        return {
+          nextState: {
+            ...state,
+            userDashboards: {
+              ...state.userDashboards,
+              [targetUserId]: nextDashboard,
+            },
+            zoneAdoptions: {
+              ...state.zoneAdoptions,
+              [targetUserId]: {
+                userId: targetUserId,
+                zoneId: targetZoneId,
+                adoptedAt: nowIso,
+                lastPassiveAwardAt: nowIso,
+              },
+            },
+          },
+          result: {
+            zone,
+            balance: nextDashboard.points,
+          },
+        };
+      });
+
+      res.json({ message: 'Zone adopted successfully.', ...result });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'ZONE_NOT_FOUND') {
+        return res.status(404).json({ message: 'Selected zone does not exist.' });
+      }
+      if (error instanceof Error && error.message === 'ZONE_ALREADY_TAKEN') {
+        return res.status(409).json({ message: 'This zone is already adopted by another user.' });
+      }
+      if (error instanceof Error && error.message === 'ALREADY_HAS_ZONE') {
+        return res.status(400).json({ message: 'You already adopted a zone. Release it first.' });
+      }
+      if (error instanceof Error && error.message === 'INSUFFICIENT_POINTS') {
+        return res.status(400).json({ message: 'Not enough Leaves to adopt this zone.' });
+      }
+      handleStorageError(res, error);
+    }
+  });
+
+  app.post('/api/adoptions/release', async (req: Request, res: Response) => {
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ message: 'userId is required.' });
+    }
+
+    const targetUserId = String(userId).trim();
+    try {
+      await mutateState((state) => {
+        if (!state.zoneAdoptions[targetUserId]) {
+          throw new Error('NO_ADOPTION');
+        }
+
+        const nextZoneAdoptions = { ...state.zoneAdoptions };
+        delete nextZoneAdoptions[targetUserId];
+
+        return {
+          nextState: {
+            ...state,
+            zoneAdoptions: nextZoneAdoptions,
+          },
+          result: null,
+        };
+      });
+
+      res.json({ message: 'Adoption released.' });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'NO_ADOPTION') {
+        return res.status(404).json({ message: 'No adopted zone found for user.' });
+      }
+      handleStorageError(res, error);
+    }
+  });
+
+  app.get('/api/adoptions/status', async (req: Request, res: Response) => {
+    const userId = String(req.query.userId || '').trim();
+    if (!userId) {
+      return res.status(400).json({ message: 'userId is required.' });
+    }
+
+    try {
+      type AdoptionStatusPayload = {
+        hasAdoption: boolean;
+        aura: 'none' | 'green' | 'red';
+        balance: number;
+        passivePointsAwarded: number;
+        openIssueCount: number;
+        zone: AdoptionZone | null;
+        adoptedAt: string | null;
+        passiveRatePerHour: number;
+      };
+
+      const status = await mutateState<AdoptionStatusPayload>((state) => {
+        const adoption = state.zoneAdoptions[userId];
+        const dashboard = getOrCreateUserDashboard(state, userId);
+        if (!adoption) {
+          return {
+            nextState: state,
+            result: {
+              hasAdoption: false,
+              aura: 'none',
+              balance: dashboard.points,
+              passivePointsAwarded: 0,
+              openIssueCount: 0,
+              zone: null,
+              adoptedAt: null,
+              passiveRatePerHour: PASSIVE_POINTS_PER_HOUR,
+            },
+          };
+        }
+
+        const zone = state.adoptionZones.find((item) => item.id === adoption.zoneId);
+        if (!zone) {
+          const nextZoneAdoptions = { ...state.zoneAdoptions };
+          delete nextZoneAdoptions[userId];
+          return {
+            nextState: {
+              ...state,
+              zoneAdoptions: nextZoneAdoptions,
+            },
+            result: {
+              hasAdoption: false,
+              aura: 'none',
+              balance: dashboard.points,
+              passivePointsAwarded: 0,
+              openIssueCount: 0,
+              zone: null,
+              adoptedAt: null,
+              passiveRatePerHour: PASSIVE_POINTS_PER_HOUR,
+            },
+          };
+        }
+
+        const openIssueCount = getOpenIssueCountInZone(state, zone);
+        const isHealthy = openIssueCount === 0;
+        let passivePointsAwarded = 0;
+        let nextAdoption = adoption;
+        let nextDashboard = dashboard;
+
+        if (isHealthy) {
+          const now = Date.now();
+          const lastAward = new Date(adoption.lastPassiveAwardAt).getTime();
+          const elapsedMs = Math.max(0, now - (Number.isNaN(lastAward) ? now : lastAward));
+          const windows = Math.floor(elapsedMs / PASSIVE_AWARD_WINDOW_MS);
+          if (windows > 0) {
+            passivePointsAwarded = Math.floor((PASSIVE_POINTS_PER_HOUR / 4) * windows);
+            nextAdoption = {
+              ...adoption,
+              lastPassiveAwardAt: new Date((Number.isNaN(lastAward) ? now : lastAward) + windows * PASSIVE_AWARD_WINDOW_MS).toISOString(),
+            };
+
+            if (passivePointsAwarded > 0) {
+              nextDashboard = {
+                ...dashboard,
+                points: dashboard.points + passivePointsAwarded,
+                actions: [
+                  {
+                    id: Date.now() + 4,
+                    title: `Passive points from ${zone.name}`,
+                    time: 'Just now',
+                    points: passivePointsAwarded,
+                    type: 'adoption-passive',
+                    userId,
+                  },
+                  ...dashboard.actions,
+                ],
+              };
+            }
+          }
+        }
+
+        return {
+          nextState: {
+            ...state,
+            zoneAdoptions: {
+              ...state.zoneAdoptions,
+              [userId]: nextAdoption,
+            },
+            userDashboards: {
+              ...state.userDashboards,
+              [userId]: nextDashboard,
+            },
+          },
+          result: {
+            hasAdoption: true,
+            aura: isHealthy ? 'green' : 'red',
+            balance: nextDashboard.points,
+            passivePointsAwarded,
+            openIssueCount,
+            zone,
+            adoptedAt: adoption.adoptedAt,
+            passiveRatePerHour: PASSIVE_POINTS_PER_HOUR,
+          },
+        };
+      });
+
+      res.json(status);
+    } catch (error) {
       handleStorageError(res, error);
     }
   });

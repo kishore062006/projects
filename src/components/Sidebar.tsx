@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LayoutDashboard, AlertTriangle, BookOpen, Gift, ShieldAlert, Leaf } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { API_BASE } from '../lib/api';
 
 interface SidebarProps {
   currentView: string;
   setCurrentView: (view: string) => void;
   user: {
+    id: string;
     name: string;
     email: string;
     role: 'user' | 'admin';
@@ -16,7 +18,36 @@ interface SidebarProps {
 
 export function Sidebar({ currentView, setCurrentView, user, onSignOut }: SidebarProps) {
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [auraStatus, setAuraStatus] = useState<'none' | 'green' | 'red'>(() => {
+    const cached = localStorage.getItem('ecoAuraStatus');
+    return cached === 'green' || cached === 'red' ? cached : 'none';
+  });
   const isLeader = user.role === 'admin';
+
+  useEffect(() => {
+    const refreshAura = async () => {
+      if (!API_BASE || !user?.id) return;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/adoptions/status?userId=${encodeURIComponent(user.id)}`);
+        if (!response.ok) return;
+
+        const data = (await response.json()) as { aura?: string };
+        const nextAura = data?.aura === 'green' || data?.aura === 'red' ? data.aura : 'none';
+        setAuraStatus(nextAura);
+        localStorage.setItem('ecoAuraStatus', nextAura);
+      } catch {
+        // Keep cached aura state.
+      }
+    };
+
+    void refreshAura();
+    const timer = setInterval(() => {
+      void refreshAura();
+    }, 60000);
+
+    return () => clearInterval(timer);
+  }, [user]);
 
   const navItems = [
     { id: 'dashboard', label: 'My Impact', icon: LayoutDashboard },
@@ -96,6 +127,11 @@ export function Sidebar({ currentView, setCurrentView, user, onSignOut }: Sideba
               <div className="flex-1">
                 <p className="text-sm font-medium text-white">{user.name}</p>
                 <p className="text-xs text-emerald-400/80 font-medium truncate">{user.email}</p>
+                {auraStatus !== 'none' && (
+                  <p className={auraStatus === 'green' ? 'text-[11px] text-emerald-300 mt-1' : 'text-[11px] text-red-300 mt-1'}>
+                    Territory Aura: {auraStatus === 'green' ? 'Green' : 'Red'}
+                  </p>
+                )}
               </div>
             </div>
             <button

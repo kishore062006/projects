@@ -14,6 +14,33 @@ type DashboardResponse = {
   graphData: Array<{ name: string; carbon: number }>;
 };
 
+type AdoptionZone = {
+  id: string;
+  name: string;
+  type: 'park' | 'street' | 'lobby';
+  lat: number;
+  lng: number;
+  radiusKm: number;
+  adoptionCost: number;
+  openIssueCount: number;
+  health: 'healthy' | 'alert';
+  adoptedByUserId: string | null;
+  isOwnedByCurrentUser: boolean;
+};
+
+type AdoptionStatusResponse = {
+  hasAdoption: boolean;
+  aura: 'none' | 'green' | 'red';
+  balance: number;
+  passivePointsAwarded: number;
+  openIssueCount?: number;
+  zone?: {
+    id: string;
+    name: string;
+  };
+  passiveRatePerHour?: number;
+};
+
 const CHALLENGE_FACTORS = {
   BUCKET_BATH_DAILY_WATER_LITERS: 31,
 } as const;
@@ -28,6 +55,9 @@ export function Rewards({ user }: RewardsProps) {
   const [waterSaved, setWaterSaved] = useState(0);
   const [transitDays, setTransitDays] = useState(0);
   const [validatedChallenges, setValidatedChallenges] = useState<Record<string, boolean>>({});
+  const [adoptionZones, setAdoptionZones] = useState<AdoptionZone[]>([]);
+  const [adoptionStatus, setAdoptionStatus] = useState<AdoptionStatusResponse | null>(null);
+  const [isAdoptionBusy, setIsAdoptionBusy] = useState(false);
 
   useEffect(() => {
     const savedPoints = localStorage.getItem('ecoPoints');
@@ -84,10 +114,116 @@ export function Rewards({ user }: RewardsProps) {
       } catch {
         // Keep local fallback values.
       }
+
+      try {
+        const zonesResponse = await fetch(
+          `${API_BASE}/api/adopt-zones?userId=${encodeURIComponent(user.id)}`,
+        );
+        if (zonesResponse.ok) {
+          const zonesData = (await zonesResponse.json()) as AdoptionZone[];
+          setAdoptionZones(Array.isArray(zonesData) ? zonesData : []);
+        }
+      } catch {
+        // Keep fallback values.
+      }
+
+      try {
+        const statusResponse = await fetch(
+          `${API_BASE}/api/adoptions/status?userId=${encodeURIComponent(user.id)}`,
+        );
+        if (statusResponse.ok) {
+          const statusData = (await statusResponse.json()) as AdoptionStatusResponse;
+          setAdoptionStatus(statusData);
+          if (typeof statusData.balance === 'number') {
+            setBalance(statusData.balance);
+            localStorage.setItem('ecoPoints', String(statusData.balance));
+          }
+          localStorage.setItem('ecoAuraStatus', String(statusData.aura || 'none'));
+        }
+      } catch {
+        // Keep fallback values.
+      }
     };
 
     void loadDynamicChallengeData();
   }, [user]);
+
+  const refreshAdoptionData = async () => {
+    if (!API_BASE || !user?.id) return;
+
+    try {
+      const [zonesResponse, statusResponse] = await Promise.all([
+        fetch(`${API_BASE}/api/adopt-zones?userId=${encodeURIComponent(user.id)}`),
+        fetch(`${API_BASE}/api/adoptions/status?userId=${encodeURIComponent(user.id)}`),
+      ]);
+
+      if (zonesResponse.ok) {
+        const zonesData = (await zonesResponse.json()) as AdoptionZone[];
+        setAdoptionZones(Array.isArray(zonesData) ? zonesData : []);
+      }
+
+      if (statusResponse.ok) {
+        const statusData = (await statusResponse.json()) as AdoptionStatusResponse;
+        setAdoptionStatus(statusData);
+        if (typeof statusData.balance === 'number') {
+          setBalance(statusData.balance);
+          localStorage.setItem('ecoPoints', String(statusData.balance));
+        }
+        localStorage.setItem('ecoAuraStatus', String(statusData.aura || 'none'));
+      }
+    } catch {
+      // Keep existing values.
+    }
+  };
+
+  const handleAdoptZone = async (zoneId: string) => {
+    if (!API_BASE || !user?.id || isAdoptionBusy) return;
+    setIsAdoptionBusy(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/adoptions/adopt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, zoneId }),
+      });
+
+      const data = (await response.json()) as { message?: string };
+      if (!response.ok) {
+        alert(data.message || 'Unable to adopt this zone right now.');
+        return;
+      }
+
+      await refreshAdoptionData();
+      alert(data.message || 'Zone adopted successfully.');
+    } catch {
+      alert('Unable to adopt this zone right now.');
+    } finally {
+      setIsAdoptionBusy(false);
+    }
+  };
+
+  const handleReleaseZone = async () => {
+    if (!API_BASE || !user?.id || isAdoptionBusy) return;
+    setIsAdoptionBusy(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/adoptions/release`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id }),
+      });
+      const data = (await response.json()) as { message?: string };
+      if (!response.ok) {
+        alert(data.message || 'Unable to release your zone.');
+        return;
+      }
+
+      await refreshAdoptionData();
+      alert(data.message || 'Adoption released.');
+    } catch {
+      alert('Unable to release your zone.');
+    } finally {
+      setIsAdoptionBusy(false);
+    }
+  };
 
   const bucketBathProgress = Math.min(7, Math.floor(waterSaved / CHALLENGE_FACTORS.BUCKET_BATH_DAILY_WATER_LITERS));
   const transitTrailblazerProgress = Math.min(5, transitDays);
@@ -241,6 +377,81 @@ export function Rewards({ user }: RewardsProps) {
             isValidated={Boolean(validatedChallenges.transitTrailblazer)}
             onValidate={() => handleValidateChallenge('transitTrailblazer', transitTrailblazerProgress, 5, 250, 'Transit Trailblazer')}
           />
+        </div>
+
+        <motion.h3
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.9 }}
+          className="text-2xl font-serif font-medium mt-16 mb-3 text-white"
+        >
+          Adopt-a-Spot Territory Game
+        </motion.h3>
+        <p className="text-white/70 mb-6">
+          Spend Leaves to adopt one zone. Keep it clean for a green aura and passive points.
+          Open pollution or damage reports inside your zone turn your aura red.
+        </p>
+
+        <div className="bg-[#1A050C] border border-[#D4AF37]/20 rounded-2xl p-5 mb-6">
+          {adoptionStatus?.hasAdoption ? (
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div>
+                <p className="text-sm text-white/70 uppercase tracking-wider mb-1">Current Territory</p>
+                <p className="text-xl text-white font-medium">{adoptionStatus.zone?.name}</p>
+                <p className={adoptionStatus.aura === 'green' ? 'text-emerald-400 mt-1' : 'text-red-400 mt-1'}>
+                  Aura: {adoptionStatus.aura === 'green' ? 'Green (Healthy)' : 'Red (Needs Cleanup)'}
+                </p>
+                <p className="text-white/70 text-sm mt-1">
+                  Open issue count: {adoptionStatus.openIssueCount || 0} • Passive rate: +{adoptionStatus.passiveRatePerHour || 20} Leaves/hour
+                </p>
+                {adoptionStatus.passivePointsAwarded > 0 && (
+                  <p className="text-emerald-300 text-sm mt-1">
+                    Passive points credited: +{adoptionStatus.passivePointsAwarded}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={handleReleaseZone}
+                disabled={isAdoptionBusy}
+                className="px-5 py-3 rounded-xl bg-red-500/20 border border-red-500/40 text-red-100 hover:bg-red-500/30 transition-colors disabled:opacity-60"
+              >
+                Release Zone
+              </button>
+            </div>
+          ) : (
+            <p className="text-white/80">No zone adopted yet. Choose one below.</p>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-8">
+          {adoptionZones.map((zone) => {
+            const isTakenByOther = Boolean(zone.adoptedByUserId && !zone.isOwnedByCurrentUser);
+            return (
+              <div key={zone.id} className="bg-[#3D101D] rounded-2xl border border-[#D4AF37]/20 p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-white font-medium">{zone.name}</p>
+                    <p className="text-white/60 text-sm capitalize mt-1">{zone.type} • Radius {zone.radiusKm} km</p>
+                    <p className={zone.health === 'healthy' ? 'text-emerald-400 text-sm mt-2' : 'text-red-400 text-sm mt-2'}>
+                      {zone.health === 'healthy' ? 'Healthy zone' : `Alert: ${zone.openIssueCount} open issues`}
+                    </p>
+                  </div>
+                  <span className="text-white/80 text-sm">{zone.adoptionCost} Leaves</span>
+                </div>
+                <button
+                  onClick={() => handleAdoptZone(zone.id)}
+                  disabled={isAdoptionBusy || !!adoptionStatus?.hasAdoption || isTakenByOther}
+                  className="mt-4 w-full py-2 rounded-xl bg-[#D4AF37]/15 text-white font-semibold hover:bg-[#D4AF37]/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {zone.isOwnedByCurrentUser
+                    ? 'Already Adopted By You'
+                    : isTakenByOther
+                    ? 'Adopted By Another User'
+                    : 'Adopt This Zone'}
+                </button>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
