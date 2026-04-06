@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AreaChart, Area, ResponsiveContainer, Tooltip, YAxis, XAxis } from 'recharts';
 import { Droplets, Wind, Recycle, Activity, ArrowUpRight, Leaf, Plus, Footprints, X } from 'lucide-react';
@@ -28,6 +28,34 @@ const defaultGraphData = [
   { name: 'Sunday', carbon: 0 },
 ];
 
+const WALK_SAMPLE_INTERVAL_MS = 5000;
+
+const haversineKm = (a: WalkPoint, b: WalkPoint) => {
+  const radiusKm = 6371;
+  const toRad = (value: number) => (value * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+
+  const h =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLng / 2) * Math.sin(dLng / 2) * Math.cos(lat1) * Math.cos(lat2);
+
+  return 2 * radiusKm * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+};
+
+const calculateRouteDistanceKm = (points: WalkPoint[]) => {
+  const orderedPoints = [...points].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  let distanceKm = 0;
+
+  for (let index = 1; index < orderedPoints.length; index += 1) {
+    distanceKm += haversineKm(orderedPoints[index - 1], orderedPoints[index]);
+  }
+
+  return Number(distanceKm.toFixed(3));
+};
+
 type DashboardResponse = {
   points: number;
   resolvedCount: number;
@@ -36,12 +64,41 @@ type DashboardResponse = {
   recentActions: Array<{ id: number; title: string; time: string; points: number | string; type: string }>;
 };
 
+type WalkPoint = {
+  lat: number;
+  lng: number;
+  timestamp: string;
+};
+
+type WalkSessionSummary = {
+  sessionId: string;
+  userId: string;
+  day: string;
+  startedAt: string;
+  updatedAt: string;
+  startPoint: WalkPoint;
+  sampleCount: number;
+};
+
+type WalkStopResponse = {
+  sessionId: string;
+  distanceKm: number;
+  awardedLeaves: number;
+  carbonSaved: number;
+  day: string;
+  durationMinutes: number;
+  aura: string;
+};
+
 interface CitizenDashboardProps {
   user: AuthUser | null;
 }
 
 export function CitizenDashboard({ user }: CitizenDashboardProps) {
   const [isLoggingAction, setIsLoggingAction] = useState(false);
+  const [isWalkStarting, setIsWalkStarting] = useState(false);
+  const [isWalkStopping, setIsWalkStopping] = useState(false);
+  const [isWalkTracking, setIsWalkTracking] = useState(false);
   
   const [recentActions, setRecentActions] = useState<any[]>([]);
   const [totalPoints, setTotalPoints] = useState(0);
@@ -54,8 +111,15 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
   const [graphData, setGraphData] = useState(defaultGraphData);
   
   const [isWalkModalOpen, setIsWalkModalOpen] = useState(false);
-  const [walkKm, setWalkKm] = useState('');
   const [walkDay, setWalkDay] = useState('Monday');
+  const [walkSession, setWalkSession] = useState<WalkSessionSummary | null>(null);
+  const [walkPoints, setWalkPoints] = useState<WalkPoint[]>([]);
+  const [walkEstimatedKm, setWalkEstimatedKm] = useState(0);
+  const [walkStatus, setWalkStatus] = useState('Start a verified walk session to earn Leaves.');
+  const [walkError, setWalkError] = useState('');
+  const walkSamplingBusyRef = useRef(false);
+  const walkIntervalRef = useRef<number | null>(null);
+  const walkSessionRef = useRef<WalkSessionSummary | null>(null);
 
   const normalizeGraphData = (incoming: Array<{ name: string; carbon: number }> | undefined) => {
     if (!incoming || incoming.length === 0) {
@@ -150,6 +214,242 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
     void loadMetrics();
   }, [user]);
 
+  useEffect(() => {
+    return () => {
+      if (walkIntervalRef.current) {
+        window.clearInterval(walkIntervalRef.current);
+        walkIntervalRef.current = null;
+      }
+      walkSessionRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const restoreWalkSession = async () => {
+      if (!API_BASE || !user?.id) return;
+
+      try {
+        const response = await fetch(`${API_BASE}/api/walk-sessions/status?userId=${encodeURIComponent(user.id)}`);
+        if (!response.ok) return;
+
+        const data = (await response.json()) as { active?: boolean } & WalkSessionSummary;
+        if (!data.active) {
+          return;
+        }
+
+        const restoredSession: WalkSessionSummary = {
+          sessionId: data.sessionId,
+          userId: data.userId,
+          day: data.day,
+          startedAt: data.startedAt,
+          updatedAt: data.updatedAt,
+          startPoint: data.startPoint,
+          sampleCount: data.sampleCount,
+        };
+        walkSessionRef.current = restoredSession;
+        setWalkSession(restoredSession);
+        setWalkPoints([data.startPoint]);
+        setWalkDay(data.day);
+        setWalkStatus('Verified walk session is active. GPS sampling has resumed.');
+        setIsWalkTracking(true);
+        setIsWalkModalOpen(true);
+        if (walkIntervalRef.current) {
+          window.clearInterval(walkIntervalRef.current);
+        }
+        walkIntervalRef.current = window.setInterval(() => {
+          void trackWalkPoint();
+        }, WALK_SAMPLE_INTERVAL_MS);
+      } catch {
+        // Keep local default state.
+      }
+    };
+
+    void restoreWalkSession();
+  }, [user]);
+
+  const requestCurrentWalkPoint = () => {
+    return new Promise<WalkPoint>((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error('Geolocation is not supported by your browser.'));
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            timestamp: new Date().toISOString(),
+          });
+        },
+        (error) => reject(error),
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+      );
+    });
+  };
+
+  const updateTrackedPoints = (nextPoints: WalkPoint[]) => {
+    setWalkPoints(nextPoints);
+    setWalkEstimatedKm(calculateRouteDistanceKm(nextPoints));
+  };
+
+  const appendTrackedPoint = (point: WalkPoint) => {
+    setWalkPoints((previousPoints) => {
+      const nextPoints = [...previousPoints, point];
+      setWalkEstimatedKm(calculateRouteDistanceKm(nextPoints));
+      return nextPoints;
+    });
+  };
+
+  const trackWalkPoint = async () => {
+    if (!API_BASE || !user?.id || !walkSessionRef.current || walkSamplingBusyRef.current) return;
+
+    walkSamplingBusyRef.current = true;
+    try {
+      const point = await requestCurrentWalkPoint();
+      const response = await fetch(`${API_BASE}/api/walk-sessions/track`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, point }),
+      });
+
+      const payload = (await response.json()) as { message?: string };
+      if (!response.ok) {
+        throw new Error(payload.message || 'Unable to record walk sample.');
+      }
+
+      appendTrackedPoint(point);
+      setWalkStatus('Tracking verified walk session...');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to record walk sample.';
+      setWalkError(message);
+    } finally {
+      walkSamplingBusyRef.current = false;
+    }
+  };
+
+  const startWalkSession = async () => {
+    if (!API_BASE || !user?.id) {
+      setWalkError('Walk verification requires a server connection.');
+      return;
+    }
+
+    setIsWalkStarting(true);
+    setWalkError('');
+
+    try {
+      const startPoint = await requestCurrentWalkPoint();
+      const response = await fetch(`${API_BASE}/api/walk-sessions/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, day: walkDay, startPoint }),
+      });
+
+      const payload = (await response.json()) as { message?: string } & WalkSessionSummary;
+      if (!response.ok) {
+        throw new Error(payload.message || 'Unable to start walk session.');
+      }
+
+      const nextSession: WalkSessionSummary = {
+        sessionId: payload.sessionId,
+        userId: payload.userId,
+        day: payload.day,
+        startedAt: payload.startedAt,
+        updatedAt: payload.updatedAt,
+        startPoint: payload.startPoint,
+        sampleCount: payload.sampleCount,
+      };
+
+      walkSessionRef.current = nextSession;
+      setWalkSession(nextSession);
+      updateTrackedPoints([startPoint]);
+      setWalkStatus('Walk session started. GPS will be sampled every 5 seconds.');
+      setIsWalkTracking(true);
+      setIsWalkModalOpen(true);
+      if (walkIntervalRef.current) {
+        window.clearInterval(walkIntervalRef.current);
+      }
+      walkIntervalRef.current = window.setInterval(() => {
+        void trackWalkPoint();
+      }, WALK_SAMPLE_INTERVAL_MS);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to start verified walk.';
+      setWalkError(message);
+      setWalkStatus('Ready to start a verified walk session.');
+    } finally {
+      setIsWalkStarting(false);
+    }
+  };
+
+  const stopWalkSession = async () => {
+    if (!API_BASE || !user?.id || !walkSessionRef.current) {
+      return;
+    }
+
+    setIsWalkStopping(true);
+    setWalkError('');
+
+    if (walkIntervalRef.current) {
+      window.clearInterval(walkIntervalRef.current);
+      walkIntervalRef.current = null;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/api/walk-sessions/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id }),
+      });
+
+      const payload = (await response.json()) as { message?: string } & WalkStopResponse;
+      if (!response.ok) {
+        throw new Error(payload.message || 'Unable to verify walk session.');
+      }
+
+      if (walkIntervalRef.current) {
+        window.clearInterval(walkIntervalRef.current);
+        walkIntervalRef.current = null;
+      }
+
+      const verifiedDistanceKm = Number(payload.distanceKm || 0);
+      const awardedLeaves = Number(payload.awardedLeaves || 0);
+      const carbonSaved = Number(payload.carbonSaved || 0);
+      const nextTotalPoints = totalPoints + awardedLeaves;
+      const nextActions = [
+        {
+          id: Date.now(),
+          title: `Verified walk: ${verifiedDistanceKm.toFixed(2)} km`,
+          time: 'Just now',
+          points: `+${awardedLeaves}`,
+          type: 'verified-walk',
+        },
+        ...recentActions,
+      ].slice(0, 5);
+
+      const nextGraphData = graphData.map((day) =>
+        day.name === payload.day ? { ...day, carbon: Number((day.carbon + carbonSaved).toFixed(1)) } : day,
+      );
+
+      setTotalPoints(nextTotalPoints);
+      setRecentActions(nextActions);
+      setGraphData(nextGraphData);
+      setIsWalkTracking(false);
+      setWalkSession(null);
+      walkSessionRef.current = null;
+      setWalkPoints([]);
+      setWalkEstimatedKm(0);
+      setWalkStatus(`Verified by server. You earned ${awardedLeaves} Leaves for ${verifiedDistanceKm.toFixed(2)} km.`);
+      localStorage.setItem('ecoPoints', String(nextTotalPoints));
+      localStorage.setItem('ecoActions', JSON.stringify(nextActions));
+      localStorage.setItem('ecoGraphData', JSON.stringify(nextGraphData));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to verify walk.';
+      setWalkError(message);
+    } finally {
+      setIsWalkStopping(false);
+    }
+  };
+
   const handleLogAction = (categoryId: string, title: string, points: number, amount: number) => {
     const newAction = {
       id: Date.now(),
@@ -232,40 +532,17 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
     void syncAction();
   };
 
-  const handleLogWalk = (e: React.FormEvent) => {
-    e.preventDefault();
-    const km = parseFloat(walkKm);
-    if (isNaN(km) || km <= 0) return;
+  const handleWalkSessionAction = () => {
+    if (isWalkStarting || isWalkStopping) {
+      return;
+    }
 
-    const carbonSaved = Number((km * IMPACT_FACTORS.CAR_EMISSIONS_KG_CO2_PER_KM).toFixed(2));
-    
-    const updatedGraphData = graphData.map(day => 
-      day.name === walkDay ? { ...day, carbon: parseFloat((day.carbon + carbonSaved).toFixed(1)) } : day
-    );
+    if (walkSession) {
+      void stopWalkSession();
+      return;
+    }
 
-    setGraphData([...updatedGraphData]);
-    localStorage.setItem('ecoGraphData', JSON.stringify(updatedGraphData));
-
-    const syncGraph = async () => {
-      if (!API_BASE || !user?.id) return;
-
-      try {
-        await fetch(`${API_BASE}/api/graph`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ day: walkDay, carbon: carbonSaved, userId: user.id }),
-        });
-      } catch {
-        // Local fallback already applied.
-      }
-    };
-    
-    const realisticCarbon = carbonSaved;
-    handleLogAction('carbon', `Walked ${km}km (Saved ${realisticCarbon}kg CO2)`, Math.floor(km * 5), km);
-    void syncGraph();
-    
-    setIsWalkModalOpen(false);
-    setWalkKm('');
+    void startWalkSession();
   };
 
   const rankImprovement = (resolvedCount * 2) + Math.floor(totalPoints / 50);
@@ -316,7 +593,7 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
               className="flex items-center gap-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/50 px-6 py-3 rounded-full font-bold transition-all"
             >
               <Footprints size={20} />
-              Log Walk
+              Start Walk
             </button>
 
             <button 
@@ -559,15 +836,22 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
               </div>
               
               <h2 className="text-2xl font-bold text-white mb-2">Track Your Walk</h2>
-              <p className="text-zinc-400 mb-8 leading-relaxed">Walking instead of driving saves ~0.2kg of CO2 per kilometer. Log your steps to update your impact graph!</p>
+              <p className="text-zinc-400 mb-4 leading-relaxed">Walking instead of driving saves ~0.2kg of CO2 per kilometer. This mode verifies your movement with live GPS, then the server awards Leaves only after validation.</p>
 
-              <form onSubmit={handleLogWalk} className="space-y-6">
+              <div className="mb-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+                <p className="text-xs uppercase tracking-wider text-emerald-400 mb-1">Session Status</p>
+                <p className="text-sm text-zinc-200">{walkStatus}</p>
+                {walkError && <p className="text-sm text-red-300 mt-2">{walkError}</p>}
+              </div>
+
+              <div className="space-y-6">
                 <div>
                   <label className="block text-sm font-medium text-zinc-300 mb-2 ml-1">Which day did you walk?</label>
                   <select 
                     value={walkDay}
                     onChange={(e) => setWalkDay(e.target.value)}
-                    className="w-full bg-white/[0.03] border border-white/10 rounded-2xl px-5 py-4 text-white focus:outline-none focus:border-emerald-500 transition-all appearance-none cursor-pointer"
+                    disabled={Boolean(walkSession)}
+                    className="w-full bg-white/[0.03] border border-white/10 rounded-2xl px-5 py-4 text-white focus:outline-none focus:border-emerald-500 transition-all appearance-none cursor-pointer disabled:opacity-60"
                   >
                     <option value="Monday" className="bg-zinc-900">Monday</option>
                     <option value="Tuesday" className="bg-zinc-900">Tuesday</option>
@@ -579,30 +863,37 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-zinc-300 mb-2 ml-1">Distance Walked</label>
-                  <div className="relative flex items-center">
-                    <input 
-                      type="number" 
-                      step="0.1"
-                      min="0.1"
-                      required
-                      value={walkKm}
-                      onChange={(e) => setWalkKm(e.target.value)}
-                      className="w-full bg-white/[0.03] border border-white/10 rounded-2xl px-6 py-4 text-4xl font-bold text-white focus:outline-none focus:border-emerald-500 transition-colors"
-                      placeholder="0"
-                    />
-                    <span className="absolute right-6 text-zinc-500 font-medium">Kilometers</span>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                    <p className="text-zinc-500 uppercase tracking-wider text-xs mb-1">Estimated Route</p>
+                    <p className="text-white font-bold text-lg">{walkEstimatedKm.toFixed(2)} km</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                    <p className="text-zinc-500 uppercase tracking-wider text-xs mb-1">GPS Samples</p>
+                    <p className="text-white font-bold text-lg">{walkPoints.length + (walkSession ? 1 : 0)}</p>
                   </div>
                 </div>
 
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-zinc-300">
+                  <p className="font-medium text-white mb-1">Server checks</p>
+                  <ul className="space-y-1 text-zinc-400 list-disc pl-5">
+                    <li>Minimum walk duration: 5 minutes</li>
+                    <li>Rejects impossible speed spikes and teleport jumps</li>
+                    <li>Leaves are awarded only after server approval</li>
+                  </ul>
+                </div>
+
                 <button 
-                  type="submit"
-                  className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 text-white rounded-xl font-bold text-lg transition-colors mt-4"
+                  type="button"
+                  onClick={handleWalkSessionAction}
+                  disabled={isWalkStarting || isWalkStopping}
+                  className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 text-white rounded-xl font-bold text-lg transition-colors mt-4 disabled:opacity-60"
                 >
-                  Update My Graph
+                  {walkSession
+                    ? (isWalkStopping ? 'Stopping Session...' : 'Stop & Verify Walk')
+                    : (isWalkStarting ? 'Starting Session...' : 'Start Walk Session')}
                 </button>
-              </form>
+              </div>
             </motion.div>
           </>
         )}

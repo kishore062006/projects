@@ -38,6 +38,32 @@ type UserDashboardState = {
   actions: Action[];
 };
 
+type WalkPoint = {
+  lat: number;
+  lng: number;
+  timestamp: string;
+};
+
+type WalkSession = {
+  id: string;
+  userId: string;
+  day: string;
+  startedAt: string;
+  updatedAt: string;
+  startPoint: WalkPoint;
+  points: WalkPoint[];
+};
+
+type WalkSessionSummary = {
+  sessionId: string;
+  userId: string;
+  day: string;
+  startedAt: string;
+  updatedAt: string;
+  startPoint: WalkPoint;
+  sampleCount: number;
+};
+
 type AdoptionZone = {
   id: string;
   name: string;
@@ -96,6 +122,7 @@ type AppState = {
   userDashboards: Record<string, UserDashboardState>;
   adoptionZones: AdoptionZone[];
   zoneAdoptions: Record<string, ZoneAdoption>;
+  walkSessions: Record<string, WalkSession>;
 };
 
 const LEADERSHIP_EMAILS = new Set(['main@gmail.com']);
@@ -125,6 +152,7 @@ const MAX_STATE_WRITE_RETRIES = 5;
 // - US EPA: A faucet dripping once/second can waste ~3,000 gallons/year -> ~31 L/day.
 // - World Bank (What a Waste 2.0): Global municipal solid waste avg ~0.74 kg/person/day.
 const IMPACT_FACTORS = {
+  CAR_EMISSIONS_KG_CO2_PER_KM: 0.251,
   WATER_SAVED_PER_REPORTED_LEAK_L: 31,
   WASTE_AVOIDED_PER_GROCERY_ACTION_KG: 0.74,
   WASTE_COLLECTED_PER_CLEANUP_HOUR_KG: 1.48,
@@ -139,6 +167,10 @@ const REPORT_CATEGORIES = [
 
 const PASSIVE_POINTS_PER_HOUR = 20;
 const PASSIVE_AWARD_WINDOW_MS = 15 * 60 * 1000;
+const WALK_MIN_DURATION_MS = 5 * 60 * 1000;
+const WALK_MAX_SPEED_KMH = 12;
+const WALK_MIN_DISTANCE_KM = 0.15;
+const WALK_POINTS_PER_KM = 5;
 
 const defaultAdoptionZones: AdoptionZone[] = [
   {
@@ -261,6 +293,50 @@ const areSameCoordinates = (a: [number, number], b: [number, number]) => {
   return Math.abs(a[0] - b[0]) <= precisionThreshold && Math.abs(a[1] - b[1]) <= precisionThreshold;
 };
 
+const haversineKm = (a: [number, number], b: [number, number]) => {
+  const radiusKm = 6371;
+  const toRad = (value: number) => (value * Math.PI) / 180;
+  const dLat = toRad(b[0] - a[0]);
+  const dLng = toRad(b[1] - a[1]);
+  const lat1 = toRad(a[0]);
+  const lat2 = toRad(b[0]);
+
+  const h =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLng / 2) * Math.sin(dLng / 2) * Math.cos(lat1) * Math.cos(lat2);
+
+  return 2 * radiusKm * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+};
+
+const calculateRouteMetrics = (points: WalkPoint[]) => {
+  const orderedPoints = [...points].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  let distanceKm = 0;
+  let maxSpeedKmh = 0;
+  let minSegmentSeconds = Number.POSITIVE_INFINITY;
+
+  for (let index = 1; index < orderedPoints.length; index += 1) {
+    const previousPoint = orderedPoints[index - 1];
+    const nextPoint = orderedPoints[index];
+    const previousTime = new Date(previousPoint.timestamp).getTime();
+    const nextTime = new Date(nextPoint.timestamp).getTime();
+    const elapsedMs = nextTime - previousTime;
+    if (elapsedMs <= 0) {
+      throw new Error('INVALID_ROUTE_TIMESTAMPS');
+    }
+
+    const segmentDistance = haversineKm([previousPoint.lat, previousPoint.lng], [nextPoint.lat, nextPoint.lng]);
+    const segmentHours = elapsedMs / (1000 * 60 * 60);
+    const segmentSpeed = segmentHours > 0 ? segmentDistance / segmentHours : Number.POSITIVE_INFINITY;
+    const segmentSeconds = elapsedMs / 1000;
+
+    distanceKm += segmentDistance;
+    maxSpeedKmh = Math.max(maxSpeedKmh, segmentSpeed);
+    minSegmentSeconds = Math.min(minSegmentSeconds, segmentSeconds);
+  }
+
+  return { distanceKm, maxSpeedKmh, minSegmentSeconds, orderedPoints };
+};
+
 const toRadians = (value: number) => (value * Math.PI) / 180;
 
 const distanceKm = (a: [number, number], b: [number, number]) => {
@@ -301,6 +377,7 @@ const defaultState: AppState = {
   userDashboards: {},
   adoptionZones: defaultAdoptionZones.map((zone) => ({ ...zone })),
   zoneAdoptions: {},
+  walkSessions: {},
 };
 
 const cloneState = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -323,6 +400,7 @@ const normalizeState = (state?: Partial<AppState> | null): AppState => ({
       ? state.adoptionZones
       : cloneState(defaultState.adoptionZones),
   zoneAdoptions: state?.zoneAdoptions ?? cloneState(defaultState.zoneAdoptions),
+  walkSessions: state?.walkSessions ?? cloneState(defaultState.walkSessions),
 });
 
 const createDefaultUserDashboard = (): UserDashboardState => ({
@@ -333,6 +411,16 @@ const createDefaultUserDashboard = (): UserDashboardState => ({
 
 const getOrCreateUserDashboard = (state: AppState, userId: string): UserDashboardState =>
   state.userDashboards[userId] ?? createDefaultUserDashboard();
+
+const getWalkSessionSummary = (session: WalkSession): WalkSessionSummary => ({
+  sessionId: session.id,
+  userId: session.userId,
+  day: session.day,
+  startedAt: session.startedAt,
+  updatedAt: session.updatedAt,
+  startPoint: session.startPoint,
+  sampleCount: 1 + session.points.length,
+});
 
 async function startServer() {
   const expressModule = await import('express');
@@ -655,6 +743,252 @@ async function startServer() {
       });
 
       res.status(201).json(action);
+    } catch (error) {
+      handleStorageError(res, error);
+    }
+  });
+
+  app.post('/api/walk-sessions/start', async (req: Request, res: Response) => {
+    const { userId, day, startPoint } = req.body as {
+      userId?: string;
+      day?: string;
+      startPoint?: WalkPoint;
+    };
+
+    if (!userId || !day || !startPoint || typeof startPoint.lat !== 'number' || typeof startPoint.lng !== 'number') {
+      return res.status(400).json({ message: 'userId, day, and startPoint are required.' });
+    }
+
+    try {
+      const session = await mutateState((state) => {
+        const targetUserId = String(userId).trim();
+        const existing = state.walkSessions[targetUserId];
+        if (existing) {
+          throw new Error('SESSION_ALREADY_ACTIVE');
+        }
+
+        const nowIso = new Date().toISOString();
+        const nextSession: WalkSession = {
+          id: `WALK-${Date.now()}`,
+          userId: targetUserId,
+          day: String(day),
+          startedAt: nowIso,
+          updatedAt: nowIso,
+          startPoint: {
+            lat: Number(startPoint.lat),
+            lng: Number(startPoint.lng),
+            timestamp: startPoint.timestamp ? String(startPoint.timestamp) : nowIso,
+          },
+          points: [],
+        };
+
+        return {
+          nextState: {
+            ...state,
+            walkSessions: {
+              ...state.walkSessions,
+              [targetUserId]: nextSession,
+            },
+          },
+          result: getWalkSessionSummary(nextSession),
+        };
+      });
+
+      res.status(201).json(session);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'SESSION_ALREADY_ACTIVE') {
+        return res.status(409).json({ message: 'A walk session is already active for this user.' });
+      }
+      handleStorageError(res, error);
+    }
+  });
+
+  app.post('/api/walk-sessions/track', async (req: Request, res: Response) => {
+    const { userId, point } = req.body as { userId?: string; point?: WalkPoint };
+    if (!userId || !point || typeof point.lat !== 'number' || typeof point.lng !== 'number') {
+      return res.status(400).json({ message: 'userId and point are required.' });
+    }
+
+    try {
+      const session = await mutateState((state) => {
+        const targetUserId = String(userId).trim();
+        const current = state.walkSessions[targetUserId];
+        if (!current) {
+          throw new Error('SESSION_NOT_FOUND');
+        }
+
+        const lastPoint = current.points[current.points.length - 1] ?? current.startPoint;
+        const nextPoint: WalkPoint = {
+          lat: Number(point.lat),
+          lng: Number(point.lng),
+          timestamp: point.timestamp ? String(point.timestamp) : new Date().toISOString(),
+        };
+
+        const segmentDistance = haversineKm([lastPoint.lat, lastPoint.lng], [nextPoint.lat, nextPoint.lng]);
+        const elapsedMs = new Date(nextPoint.timestamp).getTime() - new Date(lastPoint.timestamp).getTime();
+        if (elapsedMs <= 0) {
+          throw new Error('INVALID_TIMING');
+        }
+
+        const segmentHours = elapsedMs / (1000 * 60 * 60);
+        const speedKmh = segmentDistance / segmentHours;
+        if (segmentDistance > 0.4 || speedKmh > WALK_MAX_SPEED_KMH) {
+          throw new Error('IMPOSSIBLE_MOVEMENT');
+        }
+
+        const nextSession: WalkSession = {
+          ...current,
+          updatedAt: nextPoint.timestamp,
+          points: [...current.points, nextPoint],
+        };
+
+        return {
+          nextState: {
+            ...state,
+            walkSessions: {
+              ...state.walkSessions,
+              [targetUserId]: nextSession,
+            },
+          },
+          result: getWalkSessionSummary(nextSession),
+        };
+      });
+
+      res.json(session);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'SESSION_NOT_FOUND') {
+        return res.status(404).json({ message: 'No active walk session found.' });
+      }
+      if (error instanceof Error && error.message === 'INVALID_TIMING') {
+        return res.status(400).json({ message: 'Invalid point timing.' });
+      }
+      if (error instanceof Error && error.message === 'IMPOSSIBLE_MOVEMENT') {
+        return res.status(400).json({ message: 'Movement looks invalid. Please walk naturally and keep GPS on.' });
+      }
+      handleStorageError(res, error);
+    }
+  });
+
+  app.post('/api/walk-sessions/stop', async (req: Request, res: Response) => {
+    const { userId } = req.body as { userId?: string };
+    if (!userId) {
+      return res.status(400).json({ message: 'userId is required.' });
+    }
+
+    try {
+      const result = await mutateState((state) => {
+        const targetUserId = String(userId).trim();
+        const session = state.walkSessions[targetUserId];
+        if (!session) {
+          throw new Error('SESSION_NOT_FOUND');
+        }
+
+        const nowIso = new Date().toISOString();
+        const allPoints = [session.startPoint, ...session.points];
+        if (allPoints.length < 2) {
+          throw new Error('NOT_ENOUGH_DATA');
+        }
+
+        const startTime = new Date(session.startedAt).getTime();
+        const endTime = new Date(nowIso).getTime();
+        const durationMs = endTime - startTime;
+        if (durationMs < WALK_MIN_DURATION_MS) {
+          throw new Error('WALK_TOO_SHORT');
+        }
+
+        const metrics = calculateRouteMetrics(allPoints);
+        if (metrics.distanceKm < WALK_MIN_DISTANCE_KM) {
+          throw new Error('WALK_TOO_SHORT');
+        }
+        if (metrics.maxSpeedKmh > WALK_MAX_SPEED_KMH) {
+          throw new Error('IMPOSSIBLE_MOVEMENT');
+        }
+
+        const awardedLeaves = Math.max(1, Math.floor(metrics.distanceKm * WALK_POINTS_PER_KM));
+        const carbonSaved = Number((metrics.distanceKm * IMPACT_FACTORS.CAR_EMISSIONS_KG_CO2_PER_KM).toFixed(1));
+        const dashboard = getOrCreateUserDashboard(state, targetUserId);
+        const nextDashboard: UserDashboardState = {
+          ...dashboard,
+          points: dashboard.points + awardedLeaves,
+          actions: [
+            {
+              id: Date.now() + 5,
+              title: `Verified walk: ${metrics.distanceKm.toFixed(2)} km`,
+              time: 'Just now',
+              points: awardedLeaves,
+              type: 'verified-walk',
+              userId: targetUserId,
+            },
+            ...dashboard.actions,
+          ],
+          graphData: dashboard.graphData.map((entry) =>
+            entry.name === session.day
+              ? { ...entry, carbon: Number((entry.carbon + carbonSaved).toFixed(1)) }
+              : entry,
+          ),
+        };
+
+        const nextWalkSessions = { ...state.walkSessions };
+        delete nextWalkSessions[targetUserId];
+
+        return {
+          nextState: {
+            ...state,
+            walkSessions: nextWalkSessions,
+            userDashboards: {
+              ...state.userDashboards,
+              [targetUserId]: nextDashboard,
+            },
+          },
+          result: {
+            sessionId: session.id,
+            distanceKm: Number(metrics.distanceKm.toFixed(2)),
+            awardedLeaves,
+            carbonSaved,
+            day: session.day,
+            durationMinutes: Number((durationMs / 60000).toFixed(1)),
+            aura: 'green',
+          },
+        };
+      });
+
+      res.json(result);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'SESSION_NOT_FOUND') {
+        return res.status(404).json({ message: 'No active walk session found.' });
+      }
+      if (error instanceof Error && error.message === 'NOT_ENOUGH_DATA') {
+        return res.status(400).json({ message: 'Not enough GPS data captured.' });
+      }
+      if (error instanceof Error && error.message === 'WALK_TOO_SHORT') {
+        return res.status(400).json({ message: 'Walk too short to verify. Please walk for at least 5 minutes.' });
+      }
+      if (error instanceof Error && error.message === 'IMPOSSIBLE_MOVEMENT') {
+        return res.status(400).json({ message: 'Movement looks invalid. Please walk naturally and keep GPS on.' });
+      }
+      handleStorageError(res, error);
+    }
+  });
+
+  app.get('/api/walk-sessions/status', async (req: Request, res: Response) => {
+    const userId = String(req.query.userId || '').trim();
+    if (!userId) {
+      return res.status(400).json({ message: 'userId is required.' });
+    }
+
+    try {
+      const state = await readState();
+      const session = state.walkSessions[userId];
+      if (!session) {
+        return res.json({ active: false });
+      }
+
+      const metrics = calculateRouteMetrics([session.startPoint, ...session.points]);
+      res.json({
+        active: true,
+        ...getWalkSessionSummary(session),
+        trackedDistanceKm: Number(metrics.distanceKm.toFixed(2)),
+      });
     } catch (error) {
       handleStorageError(res, error);
     }
