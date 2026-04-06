@@ -212,7 +212,6 @@ const IMPACT_ACTION_RULES: Record<string, { pointsPerUnit: number; dailyUnitCap:
 const LOG_IMPACT_DAILY_LEAVES_CAP = 150;
 
 // Report limits
-const REPORT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 1 report per day
 const REPORT_REWARD_POINTS = 10; // Reduced from 50 to prevent farming
 
 const defaultAdoptionZones: AdoptionZone[] = [
@@ -1137,16 +1136,6 @@ async function startServer() {
       await mutateState((state) => {
         const dashboard = getOrCreateUserDashboard(state, targetUserId);
 
-        // Check for report cooldown - user can only report once per 24 hours
-        const oneDayAgo = new Date(Date.now() - REPORT_COOLDOWN_MS).toISOString();
-        const userRecentReports = state.reports.filter(
-          (r) => String(r.ownerUserId || '') === targetUserId && r.timestamp > oneDayAgo
-        );
-
-        if (userRecentReports.length > 0) {
-          throw new Error('REPORT_COOLDOWN_ACTIVE');
-        }
-
         // Check for duplicate location
         const nextCoords = parseCoordinates(report.location);
         if (nextCoords) {
@@ -1197,9 +1186,6 @@ async function startServer() {
     } catch (error) {
       if (error instanceof Error && error.message === 'DUPLICATE_LOCATION') {
         return res.status(409).json({ message: 'This location has already been reported. Please ignore duplicate submissions.' });
-      }
-      if (error instanceof Error && error.message === 'REPORT_COOLDOWN_ACTIVE') {
-        return res.status(429).json({ message: 'You can only submit one report per 24 hours. Please try again tomorrow.' });
       }
       handleStorageError(res, error);
     }

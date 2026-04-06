@@ -109,7 +109,14 @@ export function AuthorityPortal() {
     };
 
     void loadIssues();
-  }, []);
+    const refreshTimer = window.setInterval(() => {
+      void loadIssues();
+    }, 10000);
+
+    return () => {
+      window.clearInterval(refreshTimer);
+    };
+  }, [requesterId, requesterRole]);
 
   const handleMarkResolved = async (id: string) => {
     let resolvedViaApi = false;

@@ -303,9 +303,10 @@ export function ReportIssue({ user }: ReportIssueProps) {
       image: imagePreview,
     };
 
+    let useLocalFallback = !API_BASE || !user?.id;
+
     try {
       const nextCoords = parseLocationInput(location);
-      let savedToBackend = false;
       if (API_BASE && user?.id) {
         const response = await fetch(`${API_BASE}/api/reports`, {
           method: 'POST',
@@ -313,17 +314,17 @@ export function ReportIssue({ user }: ReportIssueProps) {
           body: JSON.stringify(reportData),
         });
 
-        if (response.status === 409) {
-          const data = (await response.json()) as { message?: string };
-          alert(data.message || 'This location is already reported. Please ignore duplicate submissions.');
+        if (!response.ok) {
+          const data = (await response.json().catch(() => ({}))) as { message?: string };
+          alert(data.message || 'Failed to submit report. Please try again.');
           setIsSubmitting(false);
           return;
         }
 
-        savedToBackend = response.ok;
+        useLocalFallback = false;
       }
 
-      if (!savedToBackend) {
+      if (useLocalFallback) {
         const existingReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]') as Array<{ location?: string; ownerUserId?: string }>;
         const currentUserId = user?.id || '';
         const currentUserReports = existingReports.filter((report) => String(report.ownerUserId || '') === currentUserId);
@@ -370,6 +371,53 @@ export function ReportIssue({ user }: ReportIssueProps) {
         localStorage.setItem('ecoPoints', (currentPoints + 10).toString());
       }
     } catch (error) {
+      useLocalFallback = true;
+      const nextCoords = parseLocationInput(location);
+      const existingReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]') as Array<{ location?: string; ownerUserId?: string }>;
+      const currentUserId = user?.id || '';
+      const currentUserReports = existingReports.filter((report) => String(report.ownerUserId || '') === currentUserId);
+      if (nextCoords) {
+        const hasDuplicate = currentUserReports.some((report) => {
+          const existingCoords = parseLocationInput(String(report?.location || ''));
+          if (!existingCoords) {
+            return false;
+          }
+
+          return Math.abs(existingCoords[0] - nextCoords[0]) <= 0.0001 && Math.abs(existingCoords[1] - nextCoords[1]) <= 0.0001;
+        });
+
+        if (hasDuplicate) {
+          alert('This location is already reported. Please ignore duplicate submissions.');
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
+      const reportToStore = {
+        id: `TKT-${Math.floor(Math.random() * 10000)}`,
+        ...reportData,
+        ownerUserId: currentUserId,
+        status: 'Open',
+        time: 'Just now',
+        timestamp: new Date().toISOString(),
+        category,
+      };
+
+      localStorage.setItem('ecoSyncReports', JSON.stringify([reportToStore, ...existingReports]));
+
+      const newAction = {
+        id: Date.now(),
+        title: `Reported ${reportToStore.type}`,
+        time: 'Just now',
+        points: '+10',
+        type: 'report'
+      };
+      const existingActions = JSON.parse(localStorage.getItem('ecoActions') || '[]');
+      localStorage.setItem('ecoActions', JSON.stringify([newAction, ...existingActions]));
+
+      const currentPoints = parseInt(localStorage.getItem('ecoPoints') || '0');
+      localStorage.setItem('ecoPoints', (currentPoints + 10).toString());
+
       console.error("Failed to save report", error);
     }
 
