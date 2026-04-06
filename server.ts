@@ -83,6 +83,15 @@ type StateRow = {
 const STATE_ROW_ID = 'ecosync-app-state';
 const MAX_STATE_WRITE_RETRIES = 5;
 
+// Average-based impact factors sourced from official datasets.
+// - US EPA: A faucet dripping once/second can waste ~3,000 gallons/year -> ~31 L/day.
+// - World Bank (What a Waste 2.0): Global municipal solid waste avg ~0.74 kg/person/day.
+const IMPACT_FACTORS = {
+  WATER_SAVED_PER_REPORTED_LEAK_L: 31,
+  WASTE_AVOIDED_PER_GROCERY_ACTION_KG: 0.74,
+  WASTE_COLLECTED_PER_CLEANUP_HOUR_KG: 1.48,
+} as const;
+
 const defaultState: AppState = {
   points: 0,
   graphData: defaultWeeklyGraphData.map((item) => ({ ...item })),
@@ -283,14 +292,17 @@ async function startServer() {
         let nextWasteReduced = existing.wasteReduced;
 
         if (categoryId === 'water_leak') {
-          nextWaterSaved += amount * 80;
+          nextWaterSaved += amount * IMPACT_FACTORS.WATER_SAVED_PER_REPORTED_LEAK_L;
         }
         if (categoryId === 'groceries') {
-          nextWasteReduced += amount * 4;
+          nextWasteReduced += amount * IMPACT_FACTORS.WASTE_AVOIDED_PER_GROCERY_ACTION_KG;
         }
         if (categoryId === 'cleanup') {
-          nextWasteReduced += amount * 6;
+          nextWasteReduced += amount * IMPACT_FACTORS.WASTE_COLLECTED_PER_CLEANUP_HOUR_KG;
         }
+
+        nextWaterSaved = Number(nextWaterSaved.toFixed(1));
+        nextWasteReduced = Number(nextWasteReduced.toFixed(1));
 
         const nextMetrics: UserMetrics = {
           waterSaved: nextWaterSaved,

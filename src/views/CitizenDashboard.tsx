@@ -9,6 +9,17 @@ const API_BASE = (
   import.meta.env.VITE_API_BASE_URL?.trim() || (import.meta.env.DEV ? 'http://localhost:4001' : '')
 ).replace(/\/$/, '');
 
+// Average-based impact factors sourced from official datasets.
+// - US EPA: Passenger vehicle emits ~404 g CO2 per mile -> ~0.251 kg CO2 per km.
+// - US EPA: A faucet dripping once/second can waste ~3,000 gallons/year -> ~31 L/day.
+// - World Bank (What a Waste 2.0): Global municipal solid waste avg ~0.74 kg/person/day.
+const IMPACT_FACTORS = {
+  CAR_EMISSIONS_KG_CO2_PER_KM: 0.251,
+  WATER_SAVED_PER_REPORTED_LEAK_L: 31,
+  WASTE_AVOIDED_PER_GROCERY_ACTION_KG: 0.74,
+  WASTE_COLLECTED_PER_CLEANUP_HOUR_KG: 1.48,
+} as const;
+
 // FIXED: Graph starts at 0 for all days. It will only grow when the user inputs data!
 const defaultGraphData = [
   { name: 'Monday', carbon: 0 },
@@ -69,10 +80,10 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
     if (savedPoints) setTotalPoints(parseInt(savedPoints));
 
     const savedWater = localStorage.getItem('ecoWaterSaved');
-    if (savedWater) setWaterSaved(parseInt(savedWater));
+    if (savedWater) setWaterSaved(parseFloat(savedWater));
 
     const savedWaste = localStorage.getItem('ecoWasteReduced');
-    if (savedWaste) setWasteReduced(parseInt(savedWaste));
+    if (savedWaste) setWasteReduced(parseFloat(savedWaste));
 
     const savedReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]');
     const resolved = savedReports.filter((report: any) => report.status === 'Resolved').length;
@@ -156,14 +167,17 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
     let newWaste = wasteReduced;
 
     if (categoryId === 'water_leak') {
-      newWater += amount * 80;
+      newWater += amount * IMPACT_FACTORS.WATER_SAVED_PER_REPORTED_LEAK_L;
     }
     if (categoryId === 'groceries') {
-      newWaste += amount * 4;
+      newWaste += amount * IMPACT_FACTORS.WASTE_AVOIDED_PER_GROCERY_ACTION_KG;
     }
     if (categoryId === 'cleanup') {
-      newWaste += amount * 6;
+      newWaste += amount * IMPACT_FACTORS.WASTE_COLLECTED_PER_CLEANUP_HOUR_KG;
     }
+
+    newWater = Number(newWater.toFixed(1));
+    newWaste = Number(newWaste.toFixed(1));
 
     setWaterSaved(newWater);
     setWasteReduced(newWaste);
@@ -221,7 +235,7 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
     const km = parseFloat(walkKm);
     if (isNaN(km) || km <= 0) return;
 
-    const carbonSaved = parseFloat((km * 2.5).toFixed(1)); 
+    const carbonSaved = Number((km * IMPACT_FACTORS.CAR_EMISSIONS_KG_CO2_PER_KM).toFixed(2));
     
     const updatedGraphData = graphData.map(day => 
       day.name === walkDay ? { ...day, carbon: parseFloat((day.carbon + carbonSaved).toFixed(1)) } : day
@@ -244,7 +258,7 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
       }
     };
     
-    const realisticCarbon = parseFloat((km * 0.2).toFixed(1));
+    const realisticCarbon = carbonSaved;
     handleLogAction('carbon', `Walked ${km}km (Saved ${realisticCarbon}kg CO2)`, Math.floor(km * 5), km);
     void syncGraph();
     
