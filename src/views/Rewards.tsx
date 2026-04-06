@@ -56,6 +56,14 @@ export function Rewards({ user }: RewardsProps) {
   const [isAdoptionBusy, setIsAdoptionBusy] = useState(false);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
 
+  const countTransitLogs = (actions: Array<{ type?: string; title?: string }>) => {
+    return actions.filter((action) => {
+      const actionType = String(action?.type || '').toLowerCase();
+      const actionTitle = String(action?.title || '').toLowerCase();
+      return actionType === 'transit' || actionTitle.includes('transit');
+    }).length;
+  };
+
   useEffect(() => {
     const savedPoints = localStorage.getItem('ecoPoints');
     if (savedPoints) {
@@ -67,9 +75,9 @@ export function Rewards({ user }: RewardsProps) {
       setWaterSaved(parseFloat(savedWater));
     }
 
-    const savedGraph = JSON.parse(localStorage.getItem('ecoGraphData') || '[]') as Array<{ name: string; carbon: number }>;
-    if (Array.isArray(savedGraph)) {
-      setTransitDays(savedGraph.filter((day) => Number(day?.carbon || 0) > 0).length);
+    const savedActions = JSON.parse(localStorage.getItem('ecoActions') || '[]') as Array<{ type?: string; title?: string }>;
+    if (Array.isArray(savedActions)) {
+      setTransitDays(countTransitLogs(savedActions));
     }
 
     const savedValidatedChallenges = JSON.parse(localStorage.getItem('ecoValidatedChallenges') || '{}') as Record<string, boolean>;
@@ -91,9 +99,20 @@ export function Rewards({ user }: RewardsProps) {
           localStorage.setItem('ecoPoints', String(nextBalance));
 
           if (Array.isArray(dashboardData?.graphData)) {
-            const nextTransitDays = dashboardData.graphData.filter((day) => Number(day?.carbon || 0) > 0).length;
-            setTransitDays(nextTransitDays);
             localStorage.setItem('ecoGraphData', JSON.stringify(dashboardData.graphData));
+          }
+        }
+      } catch {
+        // Keep local fallback values.
+      }
+
+      try {
+        const actionsResponse = await fetch(`${API_BASE}/api/actions?userId=${encodeURIComponent(user.id)}`);
+        if (actionsResponse.ok) {
+          const actionsData = (await actionsResponse.json()) as Array<{ type?: string; title?: string }>;
+          if (Array.isArray(actionsData)) {
+            setTransitDays(countTransitLogs(actionsData));
+            localStorage.setItem('ecoActions', JSON.stringify(actionsData));
           }
         }
       } catch {
@@ -234,7 +253,7 @@ export function Rewards({ user }: RewardsProps) {
       progress: transitTrailblazerProgress,
       total: 5,
       reward: 250,
-      unitLabel: 'Days',
+      unitLabel: 'Trips',
       delay: 0.7,
     },
     {

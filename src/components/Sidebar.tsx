@@ -52,10 +52,10 @@ export function Sidebar({ currentView, setCurrentView, user, onSignOut }: Sideba
   const navItems = [
     { id: 'dashboard', label: 'My Impact', icon: LayoutDashboard },
     { id: 'report', label: 'Report Issue', icon: AlertTriangle },
-    { id: 'helplines', label: 'Helplines', icon: PhoneCall },
     { id: 'learn', label: 'Learn', icon: BookOpen },
     { id: 'rewards', label: 'Rewards', icon: Gift },
     ...(isLeader ? [{ id: 'authority', label: 'Authority Portal', icon: ShieldAlert }] : []),
+    { id: 'helplines', label: 'Helplines', icon: PhoneCall },
   ];
 
   return (
