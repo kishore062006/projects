@@ -1562,60 +1562,6 @@ async function startServer() {
     }
   });
 
-  app.post('/api/ai/chat', async (req: Request, res: Response) => {
-    const { message } = req.body as { message?: string };
-    const userMessage = String(message || '').trim();
-
-    if (!userMessage) {
-      return res.status(400).json({ message: 'Chat message is required.' });
-    }
-
-    if (!geminiClient) {
-      return res.status(503).json({ message: 'Gemini API key is not configured on the backend.' });
-    }
-
-    const prompt = [
-      'You are EcoSync Assistant, a concise civic sustainability helper.',
-      'Help users with report guidance, challenge progress, rewards, adoption zones, and helplines.',
-      'Do not invent unavailable app features; be clear when uncertain.',
-      'Keep responses practical and short (3-8 lines).',
-      `User message: ${userMessage}`,
-    ].join(' ');
-
-    try {
-      const response = await geminiClient.models.generateContent({
-        model: 'gemini-2.0-flash',
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: prompt }],
-          },
-        ],
-      });
-
-      const reply = String(response.text || '').trim();
-      if (!reply) {
-        return res.status(502).json({ message: 'AI returned an empty response.' });
-      }
-
-      return res.json({ reply });
-    } catch (error) {
-      console.error('Gemini chat error:', error);
-      const statusCode =
-        error && typeof error === 'object' && 'status' in error && typeof (error as { status?: unknown }).status === 'number'
-          ? Number((error as { status: number }).status)
-          : 500;
-
-      if (statusCode === 429) {
-        return res.status(429).json({
-          message: 'AI quota exceeded for the current API key. Please retry later or use a key with available quota.',
-        });
-      }
-
-      return res.status(500).json({ message: 'Failed to generate chatbot response.' });
-    }
-  });
-
   app.patch('/api/reports/:id/resolve', async (req: Request, res: Response) => {
     const { id } = req.params;
     const role = String(req.query.role || req.body?.role || '').toLowerCase();
