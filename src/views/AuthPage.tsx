@@ -12,6 +12,8 @@ type AuthUser = {
   role: 'user' | 'admin';
 };
 
+const isSupportedAuthEmail = (value: string) => /^[^\s@]+@[^\s@]+\.(com|in)$/i.test(value.trim());
+
 interface AuthPageProps {
   onAuthSuccess: (user: AuthUser) => void;
 }
@@ -31,6 +33,13 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError(null);
+
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!isSupportedAuthEmail(normalizedEmail)) {
+      setError('Use a valid email with @ and ending in .com or .in.');
+      return;
+    }
+
     if (mode === 'register' && password !== confirmPassword) {
       setError('Passwords do not match.');
       return;
@@ -45,7 +54,7 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
       }
 
       const payload: Record<string, string> = {
-        email,
+        email: normalizedEmail,
         password,
       };
 
@@ -124,6 +133,8 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
                 onChange={(event) => setEmail(event.target.value)}
                 className="mt-3 w-full rounded-3xl border border-white/10 bg-black/40 px-5 py-4 text-white outline-none focus:border-emerald-400"
                 placeholder="you@example.com"
+                  pattern="^[^\s@]+@[^\s@]+\.(com|in)$"
+                  title="Use an email ending in .com or .in"
                 required
               />
             </label>

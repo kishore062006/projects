@@ -130,6 +130,7 @@ type AppState = {
 const LEADERSHIP_EMAILS = new Set(['main@gmail.com']);
 const getRoleForEmail = (email: string): User['role'] =>
   LEADERSHIP_EMAILS.has(email.trim().toLowerCase()) ? 'admin' : 'user';
+const isSupportedAuthEmail = (email: string) => /^[^\s@]+@[^\s@]+\.(com|in)$/i.test(email.trim());
 
 const defaultWeeklyGraphData: Array<{ name: string; carbon: number }> = [
   { name: 'Monday', carbon: 0 },
@@ -714,6 +715,10 @@ async function startServer() {
       return res.status(400).json({ message: 'Name, email, and password are required.' });
     }
 
+    if (!isSupportedAuthEmail(String(email))) {
+      return res.status(400).json({ message: 'Use a valid email with @ and ending in .com or .in.' });
+    }
+
     try {
       const normalizedEmail = String(email).trim().toLowerCase();
       const passwordHash = hashPassword(String(password));
@@ -753,6 +758,10 @@ async function startServer() {
     const { email, password } = req.body;
     if (!email || !password) {
       return res.status(400).json({ message: 'Email and password are required.' });
+    }
+
+    if (!isSupportedAuthEmail(String(email))) {
+      return res.status(400).json({ message: 'Use a valid email with @ and ending in .com or .in.' });
     }
 
     try {
