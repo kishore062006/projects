@@ -98,6 +98,23 @@ export function LogActionModal({ isOpen, onClose, onLogAction }: LogActionModalP
                     );
                   })}
                 </div>
+
+                <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                  <p className="text-xs font-bold uppercase tracking-widest text-zinc-400 mb-3">Impact Rules</p>
+                  <div className="space-y-2 text-sm text-zinc-300">
+                    {categories.map((cat) => (
+                      <div key={cat.id} className="flex items-center justify-between gap-4 rounded-xl bg-black/20 px-3 py-2">
+                        <span className="text-white">{cat.label}</span>
+                        <span className="text-zinc-400">
+                          +{cat.pointsPerUnit} Leaves / {dailyCaps[cat.id] ?? 5} per day
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-zinc-500 mt-3">
+                    Log Impact daily Leaves cap: 150
+                  </p>
+                </div>
               </motion.div>
             )}
 
@@ -111,7 +128,7 @@ export function LogActionModal({ isOpen, onClose, onLogAction }: LogActionModalP
                   How many {categories.find(c => c.id === category)?.unit} did you achieve?
                 </p>
                 <p className="text-xs text-zinc-500 mb-4">
-                  Daily limit: {dailyCaps[category] ?? 5} units for this category.
+                  {categories.find(c => c.id === category)?.label} gives +{categories.find(c => c.id === category)?.pointsPerUnit || 0} Leaves per unit. Daily limit: {dailyCaps[category] ?? 5} units.
                 </p>
 
                 <div className="mb-8">
