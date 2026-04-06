@@ -14,6 +14,10 @@ type DashboardResponse = {
   graphData: Array<{ name: string; carbon: number }>;
 };
 
+const CHALLENGE_FACTORS = {
+  BUCKET_BATH_DAILY_WATER_LITERS: 31,
+} as const;
+
 interface RewardsProps {
   user: AuthUser | null;
 }
@@ -32,7 +36,7 @@ export function Rewards({ user }: RewardsProps) {
 
     const savedWater = localStorage.getItem('ecoWaterSaved');
     if (savedWater) {
-      setWaterSaved(parseInt(savedWater));
+      setWaterSaved(parseFloat(savedWater));
     }
 
     const savedGraph = JSON.parse(localStorage.getItem('ecoGraphData') || '[]') as Array<{ name: string; carbon: number }>;
@@ -79,7 +83,7 @@ export function Rewards({ user }: RewardsProps) {
     void loadDynamicChallengeData();
   }, [user]);
 
-  const bucketBathProgress = Math.min(7, Math.floor(waterSaved / 80));
+  const bucketBathProgress = Math.min(7, Math.floor(waterSaved / CHALLENGE_FACTORS.BUCKET_BATH_DAILY_WATER_LITERS));
   const transitTrailblazerProgress = Math.min(5, transitDays);
 
   // ADDED: Redeem Logic
