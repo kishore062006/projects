@@ -172,6 +172,27 @@ const WALK_MAX_SPEED_KMH = 12;
 const WALK_MIN_DISTANCE_KM = 0.15;
 const WALK_POINTS_PER_KM = 5;
 
+// Server-side action points (clients cannot specify points directly)
+const VALID_ACTIONS: Record<string, number> = {
+  'saved-energy': 25,
+  'recycled': 15,
+  'used-transit': 20,
+  'carpooled': 30,
+  'planted-tree': 40,
+  'participated-cleanup': 35,
+};
+
+// Daily caps per impact category to prevent farming
+const IMPACT_CATEGORY_DAILY_CAPS: Record<string, number> = {
+  'water_leak': 5,
+  'groceries': 10,
+  'cleanup': 3,
+};
+
+// Report limits
+const REPORT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 1 report per day
+const REPORT_REWARD_POINTS = 10; // Reduced from 50 to prevent farming
+
 const defaultAdoptionZones: AdoptionZone[] = [
   {
     id: 'zone-lalbagh',
@@ -590,6 +611,16 @@ async function startServer() {
       return res.status(400).json({ message: 'Valid userId, categoryId, and amount are required.' });
     }
 
+    // Validate amount against daily cap
+    const dailyCap = IMPACT_CATEGORY_DAILY_CAPS[categoryId as keyof typeof IMPACT_CATEGORY_DAILY_CAPS];
+    if (!dailyCap) {
+      return res.status(400).json({ message: `Invalid category '${categoryId}'. Valid categories: ${Object.keys(IMPACT_CATEGORY_DAILY_CAPS).join(', ')}` });
+    }
+
+    if (amount > dailyCap) {
+      return res.status(429).json({ message: `Daily cap for '${categoryId}' is ${dailyCap}. You requested ${amount}.` });
+    }
+
     try {
       const metrics = await mutateState((state) => {
         const existing = state.userMetrics[userId] ?? {
@@ -597,6 +628,17 @@ async function startServer() {
           wasteReduced: 0,
           updatedAt: new Date(0).toISOString(),
         };
+
+        // Check daily cap by counting logs from today
+        const today = new Date().toISOString().split('T')[0];
+        const todayLogs = (state.actions || [])
+          .filter((action) => action.userId === userId && action.type === `impact-log-${categoryId}`)
+          .filter((action) => action.time.includes(today))
+          .length;
+
+        if (todayLogs >= dailyCap) {
+          throw new Error(`DAILY_CAP_EXCEEDED_${categoryId}`);
+        }
 
         let nextWaterSaved = existing.waterSaved;
         let nextWasteReduced = existing.wasteReduced;
@@ -634,6 +676,11 @@ async function startServer() {
 
       res.json(metrics);
     } catch (error) {
+      if (error instanceof Error && error.message.startsWith('DAILY_CAP_EXCEEDED_')) {
+        const category = error.message.replace('DAILY_CAP_EXCEEDED_', '');
+        const cap = IMPACT_CATEGORY_DAILY_CAPS[category as keyof typeof IMPACT_CATEGORY_DAILY_CAPS];
+        return res.status(429).json({ message: `Daily cap of ${cap} reached for '${category}'. Try again tomorrow.` });
+      }
       handleStorageError(res, error);
     }
   });
@@ -706,9 +753,16 @@ async function startServer() {
   });
 
   app.post('/api/actions', async (req: Request, res: Response) => {
-    const { title, points, type, userId } = req.body;
-    if (!title || typeof points !== 'number' || !userId) {
-      return res.status(400).json({ message: 'Invalid action payload. userId is required.' });
+    const { title, type, userId } = req.body;
+    if (!title || !type || !userId) {
+      return res.status(400).json({ message: 'Invalid action payload. userId, title, and type are required.' });
+    }
+
+    // Server-side point validation - clients cannot specify arbitrary points
+    const actionType = String(type).toLowerCase().trim();
+    const serverPoints = VALID_ACTIONS[actionType];
+    if (typeof serverPoints !== 'number') {
+      return res.status(400).json({ message: `Invalid action type "${actionType}". Valid types: ${Object.keys(VALID_ACTIONS).join(', ')}` });
     }
 
     try {
@@ -716,8 +770,8 @@ async function startServer() {
         id: Date.now(),
         title,
         time: 'Just now',
-        points,
-        type: type || 'user-logged',
+        points: serverPoints,
+        type: actionType,
         userId: String(userId),
       };
 
@@ -726,7 +780,7 @@ async function startServer() {
         const dashboard = getOrCreateUserDashboard(state, targetUserId);
         const nextDashboard: UserDashboardState = {
           ...dashboard,
-          points: dashboard.points + points,
+          points: dashboard.points + serverPoints,
           actions: [action, ...dashboard.actions],
         };
 
@@ -1016,18 +1070,19 @@ async function startServer() {
 
   app.post('/api/reports', async (req: Request, res: Response) => {
     const { type, location, address, priority, reporter, description, image, userId } = req.body;
-    if (!type || !location || !reporter || !description || !userId) {
-      return res.status(400).json({ message: 'Missing required report fields.' });
+    if (!type || !location || !reporter || !description || !userId || !image) {
+      return res.status(400).json({ message: 'Missing required report fields. Photo/image evidence is required.' });
     }
 
     try {
+      const targetUserId = String(userId);
       const id = `TKT-${Math.floor(1000 + Math.random() * 9000)}`;
       const report: Report = {
         id,
         type,
         location,
         address: address ? String(address).trim() : '',
-        ownerUserId: String(userId),
+        ownerUserId: targetUserId,
         priority: priority || 'High',
         status: 'Open',
         time: 'Just now',
@@ -1038,9 +1093,19 @@ async function startServer() {
       };
 
       await mutateState((state) => {
-        const targetUserId = String(userId);
         const dashboard = getOrCreateUserDashboard(state, targetUserId);
 
+        // Check for report cooldown - user can only report once per 24 hours
+        const oneDayAgo = new Date(Date.now() - REPORT_COOLDOWN_MS).toISOString();
+        const userRecentReports = state.reports.filter(
+          (r) => String(r.ownerUserId || '') === targetUserId && r.timestamp > oneDayAgo
+        );
+
+        if (userRecentReports.length > 0) {
+          throw new Error('REPORT_COOLDOWN_ACTIVE');
+        }
+
+        // Check for duplicate location
         const nextCoords = parseCoordinates(report.location);
         if (nextCoords) {
           const hasDuplicate = state.reports.some((existingReport) => {
@@ -1067,13 +1132,13 @@ async function startServer() {
               ...state.userDashboards,
               [targetUserId]: {
                 ...dashboard,
-                points: dashboard.points + 50,
+                points: dashboard.points + REPORT_REWARD_POINTS,
                 actions: [
                   {
                     id: Date.now() + 1,
                     title: `Reported ${type}`,
                     time: 'Just now',
-                    points: 50,
+                    points: REPORT_REWARD_POINTS,
                     type: 'report',
                     userId: targetUserId,
                   },
@@ -1090,6 +1155,9 @@ async function startServer() {
     } catch (error) {
       if (error instanceof Error && error.message === 'DUPLICATE_LOCATION') {
         return res.status(409).json({ message: 'This location has already been reported. Please ignore duplicate submissions.' });
+      }
+      if (error instanceof Error && error.message === 'REPORT_COOLDOWN_ACTIVE') {
+        return res.status(429).json({ message: 'You can only submit one report per 24 hours. Please try again tomorrow.' });
       }
       handleStorageError(res, error);
     }
