@@ -111,6 +111,7 @@ export function ReportIssue({ user }: ReportIssueProps) {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [category, setCategory] = useState("Water Leakage (SDG 6)");
   const [location, setLocation] = useState("12.9716° N, 77.5946° E");
+  const [address, setAddress] = useState('');
   const [mapCoords, setMapCoords] = useState<[number, number]>(DEFAULT_COORDS);
   const [showMapPicker, setShowMapPicker] = useState(false);
   const [description, setDescription] = useState("");
@@ -294,11 +295,13 @@ export function ReportIssue({ user }: ReportIssueProps) {
       priority: categoryPriorityMap[category as (typeof AI_CATEGORIES)[number]] || 'High',
       reporter: reporterName,
       location,
+      address: address.trim(),
       description,
       image: imagePreview,
     };
 
     try {
+      const nextCoords = parseLocationInput(location);
       let savedToBackend = false;
       if (API_BASE) {
         const response = await fetch(`${API_BASE}/api/reports`, {
@@ -306,10 +309,36 @@ export function ReportIssue({ user }: ReportIssueProps) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(reportData),
         });
+
+        if (response.status === 409) {
+          const data = (await response.json()) as { message?: string };
+          alert(data.message || 'This location is already reported. Please ignore duplicate submissions.');
+          setIsSubmitting(false);
+          return;
+        }
+
         savedToBackend = response.ok;
       }
 
       if (!savedToBackend) {
+        const existingReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]') as Array<{ location?: string }>;
+        if (nextCoords) {
+          const hasDuplicate = existingReports.some((report) => {
+            const existingCoords = parseLocationInput(String(report?.location || ''));
+            if (!existingCoords) {
+              return false;
+            }
+
+            return Math.abs(existingCoords[0] - nextCoords[0]) <= 0.0001 && Math.abs(existingCoords[1] - nextCoords[1]) <= 0.0001;
+          });
+
+          if (hasDuplicate) {
+            alert('This location is already reported. Please ignore duplicate submissions.');
+            setIsSubmitting(false);
+            return;
+          }
+        }
+
         const reportToStore = {
           id: `TKT-${Math.floor(Math.random() * 10000)}`,
           ...reportData,
@@ -319,7 +348,6 @@ export function ReportIssue({ user }: ReportIssueProps) {
           category,
         };
 
-        const existingReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]');
         localStorage.setItem('ecoSyncReports', JSON.stringify([reportToStore, ...existingReports]));
 
         const newAction = {
@@ -580,6 +608,17 @@ export function ReportIssue({ user }: ReportIssueProps) {
                     </div>
                   </div>
                 )}
+              </motion.div>
+
+              <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.45 }}>
+                <label className="block text-sm font-medium text-zinc-300 mb-2 ml-1">Address (Optional)</label>
+                <input
+                  type="text"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder="House no, street, area, city"
+                  className="w-full bg-black/20 border border-white/10 rounded-2xl px-5 py-4 text-white focus:outline-none focus:border-emerald-500/50 focus:bg-black/40 transition-all shadow-inner"
+                />
               </motion.div>
 
               {/* Description */}

@@ -12,6 +12,7 @@ type Report = {
   id: string;
   type: string;
   location: string;
+  address?: string;
   status: ReportStatus;
   priority: string;
   time: string;
@@ -137,6 +138,48 @@ const parseModelJson = (raw: string): Record<string, unknown> | null => {
       return null;
     }
   }
+};
+
+const parseCoordinates = (value: string): [number, number] | null => {
+  const parts = String(value || '')
+    .split(',')
+    .map((part) => part.trim());
+
+  if (parts.length !== 2) {
+    return null;
+  }
+
+  const parsePart = (part: string) => {
+    const numeric = Number.parseFloat(part.replace(/[^\d.-]/g, ''));
+    if (Number.isNaN(numeric)) {
+      return null;
+    }
+
+    if (/[sSwW]/.test(part)) {
+      return -Math.abs(numeric);
+    }
+    if (/[nNeE]/.test(part)) {
+      return Math.abs(numeric);
+    }
+    return numeric;
+  };
+
+  const lat = parsePart(parts[0]);
+  const lng = parsePart(parts[1]);
+  if (lat === null || lng === null) {
+    return null;
+  }
+
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    return null;
+  }
+
+  return [lat, lng];
+};
+
+const areSameCoordinates = (a: [number, number], b: [number, number]) => {
+  const precisionThreshold = 0.0001;
+  return Math.abs(a[0] - b[0]) <= precisionThreshold && Math.abs(a[1] - b[1]) <= precisionThreshold;
 };
 
 const defaultState: AppState = {
@@ -484,7 +527,7 @@ async function startServer() {
   });
 
   app.post('/api/reports', async (req: Request, res: Response) => {
-    const { type, location, priority, reporter, description, image } = req.body;
+    const { type, location, address, priority, reporter, description, image } = req.body;
     if (!type || !location || !reporter || !description) {
       return res.status(400).json({ message: 'Missing required report fields.' });
     }
@@ -495,6 +538,7 @@ async function startServer() {
         id,
         type,
         location,
+        address: address ? String(address).trim() : '',
         priority: priority || 'High',
         status: 'Open',
         time: 'Just now',
@@ -504,27 +548,47 @@ async function startServer() {
         timestamp: new Date().toISOString(),
       };
 
-      await mutateState((state) => ({
-        nextState: {
-          ...state,
-          reports: [report, ...state.reports],
-          actions: [
-            {
-              id: Date.now() + 1,
-              title: `Reported ${type}`,
-              time: 'Just now',
-              points: 50,
-              type: 'report',
-            },
-            ...state.actions,
-          ],
-          points: state.points + 50,
-        },
-        result: null,
-      }));
+      await mutateState((state) => {
+        const nextCoords = parseCoordinates(report.location);
+        if (nextCoords) {
+          const hasDuplicate = state.reports.some((existingReport) => {
+            const existingCoords = parseCoordinates(existingReport.location);
+            if (!existingCoords) {
+              return false;
+            }
+            return areSameCoordinates(existingCoords, nextCoords);
+          });
+
+          if (hasDuplicate) {
+            throw new Error('DUPLICATE_LOCATION');
+          }
+        }
+
+        return {
+          nextState: {
+            ...state,
+            reports: [report, ...state.reports],
+            actions: [
+              {
+                id: Date.now() + 1,
+                title: `Reported ${type}`,
+                time: 'Just now',
+                points: 50,
+                type: 'report',
+              },
+              ...state.actions,
+            ],
+            points: state.points + 50,
+          },
+          result: null,
+        };
+      });
 
       res.status(201).json(report);
     } catch (error) {
+      if (error instanceof Error && error.message === 'DUPLICATE_LOCATION') {
+        return res.status(409).json({ message: 'This location has already been reported. Please ignore duplicate submissions.' });
+      }
       handleStorageError(res, error);
     }
   });

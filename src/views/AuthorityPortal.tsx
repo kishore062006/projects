@@ -348,6 +348,10 @@ export function AuthorityPortal() {
                   <p className="text-sm text-zinc-200">{selectedIssue.location}</p>
                 </div>
                 <div>
+                  <p className="text-xs uppercase tracking-wider text-zinc-500 mb-1">Address</p>
+                  <p className="text-sm text-zinc-200">{selectedIssue.address || 'No address provided.'}</p>
+                </div>
+                <div>
                   <p className="text-xs uppercase tracking-wider text-zinc-500 mb-1">Description</p>
                   <p className="text-sm text-zinc-200 whitespace-pre-wrap">{selectedIssue.description || 'No details provided.'}</p>
                 </div>
