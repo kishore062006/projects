@@ -13,10 +13,10 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-// ADDED: Helper to parse coordinate string "40.7128° N, 74.0060° W" to [Lat, Lng] array
+// ADDED: Helper to parse coordinate string "12.9716° N, 77.5946° E" to [Lat, Lng] array
 const parseCoords = (coordStr: string): [number, number] => {
   try {
-    if (!coordStr) return [40.7128, -74.0060];
+    if (!coordStr) return [12.9716, 77.5946];
 
     const decimalParts = coordStr.split(',').map((part) => part.trim());
     if (decimalParts.length === 2 && !coordStr.includes('°')) {
@@ -27,7 +27,7 @@ const parseCoords = (coordStr: string): [number, number] => {
       }
     }
 
-    if (!coordStr.includes('°')) return [40.7128, -74.0060]; // Default fallback
+    if (!coordStr.includes('°')) return [12.9716, 77.5946]; // Default fallback
     const parts = coordStr.split(',');
     let lat = parseFloat(parts[0].replace(/[^\d.-]/g, ''));
     let lng = parseFloat(parts[1].replace(/[^\d.-]/g, ''));
@@ -35,7 +35,7 @@ const parseCoords = (coordStr: string): [number, number] => {
     if (parts[1].includes('W')) lng = -lng;
     return [lat, lng];
   } catch (e) {
-    return [40.7128, -74.0060];
+    return [12.9716, 77.5946];
   }
 };
 
@@ -195,7 +195,7 @@ export function AuthorityPortal() {
       {viewMode === 'map' ? (
         <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl overflow-hidden h-[600px] relative z-0">
           <MapContainer 
-            center={[40.7128, -74.0060]} 
+            center={[12.9716, 77.5946]} 
             zoom={12} 
             style={{ height: '100%', width: '100%', zIndex: 0 }}
           >

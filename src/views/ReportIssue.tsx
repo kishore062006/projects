@@ -36,7 +36,7 @@ const categoryPriorityMap: Record<(typeof AI_CATEGORIES)[number], 'Critical' | '
   'Damaged Green Infrastructure (SDG 13)': 'Medium',
 };
 
-const DEFAULT_COORDS: [number, number] = [40.7128, -74.0060];
+const DEFAULT_COORDS: [number, number] = [12.9716, 77.5946];
 
 const parseLocationInput = (value: string): [number, number] | null => {
   const parts = value.split(',').map((part) => part.trim());
@@ -110,7 +110,7 @@ export function ReportIssue({ user }: ReportIssueProps) {
   
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [category, setCategory] = useState("Water Leakage (SDG 6)");
-  const [location, setLocation] = useState("40.7128° N, 74.0060° W");
+  const [location, setLocation] = useState("12.9716° N, 77.5946° E");
   const [mapCoords, setMapCoords] = useState<[number, number]>(DEFAULT_COORDS);
   const [showMapPicker, setShowMapPicker] = useState(false);
   const [description, setDescription] = useState("");
@@ -534,7 +534,7 @@ export function ReportIssue({ user }: ReportIssueProps) {
                     <MapPin size={20} className="absolute left-5 top-1/2 -translate-y-1/2 text-emerald-500" />
                     <input 
                       type="text" 
-                      placeholder="40.7128, -74.0060 or 40.7128° N, 74.0060° W" 
+                      placeholder="12.9716, 77.5946 or 12.9716° N, 77.5946° E" 
                       className="w-full bg-black/20 border border-white/10 rounded-2xl pl-14 pr-5 py-4 text-white focus:outline-none focus:border-emerald-500/50 focus:bg-black/40 transition-all shadow-inner"
                       value={location}
                       onChange={(e) => setLocation(e.target.value)}
