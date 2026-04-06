@@ -7,6 +7,7 @@ import { AuthorityPortal } from './views/AuthorityPortal';
 import { ReportIssue } from './views/ReportIssue';
 import { AuthPage } from './views/AuthPage';
 import { Helplines } from './views/Helplines';
+import { Chatbot } from './views/Chatbot';
 
 export type AuthUser = {
   id: string;
@@ -56,6 +57,8 @@ export default function App() {
         return <Rewards user={user} />;
       case 'helplines':
         return <Helplines />;
+      case 'chatbot':
+        return <Chatbot />;
       case 'authority':
         return isLeader ? <AuthorityPortal /> : <CitizenDashboard user={user} />;
       default:
