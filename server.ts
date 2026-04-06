@@ -69,6 +69,10 @@ type AppState = {
   userMetrics: Record<string, UserMetrics>;
 };
 
+const LEADERSHIP_EMAILS = new Set(['main@gmail.com']);
+const getRoleForEmail = (email: string): User['role'] =>
+  LEADERSHIP_EMAILS.has(email.trim().toLowerCase()) ? 'admin' : 'user';
+
 const defaultWeeklyGraphData: Array<{ name: string; carbon: number }> = [
   { name: 'Monday', carbon: 0 },
   { name: 'Tuesday', carbon: 0 },
@@ -388,7 +392,7 @@ async function startServer() {
         name: String(name).trim(),
         email: normalizedEmail,
         passwordHash,
-        role: 'user',
+        role: getRoleForEmail(normalizedEmail),
       };
 
       await mutateState((state) => {
@@ -433,7 +437,8 @@ async function startServer() {
         return res.status(401).json({ message: 'Invalid credentials.' });
       }
 
-      res.json({ id: user.id, name: user.name, email: user.email, role: user.role });
+      const effectiveRole = getRoleForEmail(user.email);
+      res.json({ id: user.id, name: user.name, email: user.email, role: effectiveRole });
     } catch (error) {
       handleStorageError(res, error);
     }

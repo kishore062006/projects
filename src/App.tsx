@@ -17,6 +17,7 @@ export type AuthUser = {
 export default function App() {
   const [currentView, setCurrentView] = useState('dashboard');
   const [user, setUser] = useState<AuthUser | null>(null);
+  const isLeader = user?.role === 'admin';
 
   useEffect(() => {
     const storedUser = localStorage.getItem('ecoSyncUser');
@@ -50,7 +51,7 @@ export default function App() {
       case 'rewards':
         return <Rewards user={user} />;
       case 'authority':
-        return <AuthorityPortal />;
+        return isLeader ? <AuthorityPortal /> : <CitizenDashboard user={user} />;
       default:
         return <CitizenDashboard user={user} />;
     }

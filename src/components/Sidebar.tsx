@@ -9,19 +9,21 @@ interface SidebarProps {
   user: {
     name: string;
     email: string;
+    role: 'user' | 'admin';
   };
   onSignOut: () => void;
 }
 
 export function Sidebar({ currentView, setCurrentView, user, onSignOut }: SidebarProps) {
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const isLeader = user.role === 'admin';
 
   const navItems = [
     { id: 'dashboard', label: 'My Impact', icon: LayoutDashboard },
     { id: 'report', label: 'Report Issue', icon: AlertTriangle },
     { id: 'learn', label: 'Learn', icon: BookOpen },
     { id: 'rewards', label: 'Rewards', icon: Gift },
-    { id: 'authority', label: 'Authority Portal', icon: ShieldAlert },
+    ...(isLeader ? [{ id: 'authority', label: 'Authority Portal', icon: ShieldAlert }] : []),
   ];
 
   return (
