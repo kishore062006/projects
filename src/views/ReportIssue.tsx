@@ -119,6 +119,7 @@ export function ReportIssue({ user }: ReportIssueProps) {
   const [description, setDescription] = useState("");
   const [isFetchingGPS, setIsFetchingGPS] = useState(false);
   const [isAITagging, setIsAITagging] = useState(false);
+  const [categoryManuallySet, setCategoryManuallySet] = useState(false);
 
   // WebRTC Camera State & Refs for Laptop Webcam support
   const [isCameraOpen, setIsCameraOpen] = useState(false);
@@ -195,6 +196,7 @@ export function ReportIssue({ user }: ReportIssueProps) {
 
   const triggerAITagging = async (imageDataUrl: string) => {
     setIsAITagging(true);
+    const categoryHint = categoryManuallySet ? category : undefined;
 
     const buildAnalysisText = (summary: string, additionalDetails: string) => {
       const parts = [summary.trim(), additionalDetails.trim()].filter(Boolean);
@@ -202,8 +204,10 @@ export function ReportIssue({ user }: ReportIssueProps) {
     };
 
     const applyFallback = () => {
-      const detectedCategory = getFallbackCategory(category);
-      setCategory(detectedCategory);
+      const detectedCategory = getFallbackCategory(categoryHint || null);
+      if (!categoryManuallySet) {
+        setCategory(detectedCategory);
+      }
       setDescription(
         buildAnalysisText(
           `AI-assisted fallback: Potential ${detectedCategory.split('(')[0].trim()} spotted in the image.`,
@@ -222,7 +226,7 @@ export function ReportIssue({ user }: ReportIssueProps) {
       const response = await fetch(`${API_BASE}/api/ai/report-analysis`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageDataUrl, hintCategory: category }),
+        body: JSON.stringify({ imageDataUrl, hintCategory: categoryHint }),
       });
 
       if (!response.ok) {
@@ -233,9 +237,11 @@ export function ReportIssue({ user }: ReportIssueProps) {
       const data = (await response.json()) as { category?: string; description?: string; additionalDetails?: string };
       const detectedCategory = AI_CATEGORIES.includes((data.category || '') as (typeof AI_CATEGORIES)[number])
         ? (data.category as (typeof AI_CATEGORIES)[number])
-        : getFallbackCategory(category);
+        : getFallbackCategory(categoryHint || null);
 
-      setCategory(detectedCategory);
+      if (!categoryManuallySet) {
+        setCategory(detectedCategory);
+      }
       setDescription(
         buildAnalysisText(
           String(data.description || '').trim() ||
@@ -459,6 +465,7 @@ export function ReportIssue({ user }: ReportIssueProps) {
                 setSubmitted(false);
                 setImagePreview(null);
                 setDescription(""); 
+                setCategoryManuallySet(false);
               }}
               className="w-full py-4 bg-white/[0.05] hover:bg-white/[0.1] border border-white/10 text-white rounded-2xl font-medium transition-colors shadow-inner"
             >
@@ -594,7 +601,10 @@ export function ReportIssue({ user }: ReportIssueProps) {
                 <div className="relative">
                   <select 
                     value={category}
-                    onChange={(e) => setCategory(e.target.value)}
+                    onChange={(e) => {
+                      setCategory(e.target.value);
+                      setCategoryManuallySet(true);
+                    }}
                     className={`w-full bg-black/20 border ${isAITagging ? 'border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.3)]' : 'border-white/10'} rounded-2xl px-5 py-4 text-white focus:outline-none focus:border-emerald-500/50 focus:bg-black/40 transition-all appearance-none shadow-inner cursor-pointer`}
                   >
                     <option className="bg-zinc-900">Water Leakage (SDG 6)</option>

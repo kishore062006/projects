@@ -167,23 +167,41 @@ const REPORT_CATEGORIES = [
   'Damaged Green Infrastructure (SDG 13)',
 ] as const;
 
-const mapModelCategory = (rawCategory: string, hintCategory?: string): (typeof REPORT_CATEGORIES)[number] => {
+const CATEGORY_KEYWORDS: Record<(typeof REPORT_CATEGORIES)[number], string[]> = {
+  'Water Leakage (SDG 6)': ['leak', 'leakage', 'pipe', 'burst', 'overflow', 'tap', 'puddle', 'seepage', 'water flow'],
+  'Illegal Dumping (SDG 11)': ['dump', 'dumping', 'garbage', 'trash', 'litter', 'waste pile', 'plastic bags', 'debris'],
+  'Polluted Water Body (SDG 6)': ['polluted', 'pollution', 'sewage', 'dirty water', 'foam', 'algae', 'water body', 'drain water'],
+  'Damaged Green Infrastructure (SDG 13)': ['tree', 'sapling', 'park', 'green belt', 'broken planter', 'damaged median', 'infrastructure'],
+};
+
+const mapModelCategory = (
+  rawCategory: string,
+  hintCategory?: string,
+  description?: string,
+  additionalDetails?: string,
+): (typeof REPORT_CATEGORIES)[number] => {
   const normalized = String(rawCategory || '').trim().toLowerCase();
   if (REPORT_CATEGORIES.includes(rawCategory as (typeof REPORT_CATEGORIES)[number])) {
     return rawCategory as (typeof REPORT_CATEGORIES)[number];
   }
 
-  if (normalized.includes('water leak') || normalized.includes('leakage') || normalized.includes('pipe burst')) {
-    return 'Water Leakage (SDG 6)';
+  const evidence = `${normalized} ${String(description || '').toLowerCase()} ${String(additionalDetails || '').toLowerCase()}`;
+  const scoredCategories = REPORT_CATEGORIES.map((category) => {
+    const score = CATEGORY_KEYWORDS[category].reduce((sum, keyword) => {
+      return evidence.includes(keyword) ? sum + 1 : sum;
+    }, 0);
+    return { category, score };
+  }).sort((a, b) => b.score - a.score);
+
+  const topScore = scoredCategories[0]?.score || 0;
+  const topMatches = scoredCategories.filter((item) => item.score === topScore).map((item) => item.category);
+
+  if (topScore > 0 && topMatches.length === 1) {
+    return topMatches[0];
   }
-  if (normalized.includes('dump') || normalized.includes('garbage') || normalized.includes('trash') || normalized.includes('waste pile')) {
-    return 'Illegal Dumping (SDG 11)';
-  }
-  if (normalized.includes('pollut') || normalized.includes('sewage') || normalized.includes('dirty water') || normalized.includes('water body')) {
-    return 'Polluted Water Body (SDG 6)';
-  }
-  if (normalized.includes('tree') || normalized.includes('green') || normalized.includes('park') || normalized.includes('infrastructure')) {
-    return 'Damaged Green Infrastructure (SDG 13)';
+
+  if (topScore > 0 && hintCategory && topMatches.includes(hintCategory as (typeof REPORT_CATEGORIES)[number])) {
+    return hintCategory as (typeof REPORT_CATEGORIES)[number];
   }
 
   if (hintCategory && REPORT_CATEGORIES.includes(hintCategory as (typeof REPORT_CATEGORIES)[number])) {
@@ -1484,8 +1502,9 @@ async function startServer() {
       'You are classifying a civic/environmental issue from an image.',
       'Use only visible evidence from the image and do not invent unseen details.',
       'Describe what is visibly in the image and provide useful report-ready context.',
-      hintCategory ? `User selected category hint: ${hintCategory}. Use this only if consistent with image evidence.` : '',
+      hintCategory ? `User selected category hint: ${hintCategory}. Use this only if it clearly matches visible evidence.` : '',
       `Choose one category only from: ${REPORT_CATEGORIES.join(', ')}.`,
+      'Category rules: water leak/pipe overflow -> Water Leakage; trash piles/litter -> Illegal Dumping; visibly dirty/contaminated water -> Polluted Water Body; damaged trees/planters/green civic assets -> Damaged Green Infrastructure.',
       'Return strict JSON only with keys: category, description, additionalDetails.',
       'description must be 1-2 concise sentences for a municipal issue report.',
       'additionalDetails must add 1-3 concise sentences with visible clues, likely cause, and urgency.',
@@ -1518,11 +1537,13 @@ async function startServer() {
       }
 
       const rawCategory = String(parsed.category || '').trim();
-      const category = mapModelCategory(rawCategory, hintCategory);
+      const parsedDescription = String(parsed.description || '').trim();
+      const parsedAdditionalDetails = String(parsed.additionalDetails || '').trim();
+      const category = mapModelCategory(rawCategory, hintCategory, parsedDescription, parsedAdditionalDetails);
       const fallbackDescription = `Potential ${category.split('(')[0].trim()} identified in the uploaded image. Please verify severity on-site.`;
-      const description = String(parsed.description || '').trim() || fallbackDescription;
+      const description = parsedDescription || fallbackDescription;
       const additionalDetails =
-        String(parsed.additionalDetails || '').trim() ||
+        parsedAdditionalDetails ||
         'No extra visual details were returned by the model. Please review the image manually for context.';
 
       res.json({ category, description, additionalDetails });
