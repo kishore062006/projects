@@ -1,5 +1,5 @@
-import React from 'react';
-import { motion } from 'framer-motion';
+import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { LayoutDashboard, AlertTriangle, BookOpen, Gift, ShieldAlert, Leaf } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -14,6 +14,8 @@ interface SidebarProps {
 }
 
 export function Sidebar({ currentView, setCurrentView, user, onSignOut }: SidebarProps) {
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+
   const navItems = [
     { id: 'dashboard', label: 'My Impact', icon: LayoutDashboard },
     { id: 'report', label: 'Report Issue', icon: AlertTriangle },
@@ -96,7 +98,7 @@ export function Sidebar({ currentView, setCurrentView, user, onSignOut }: Sideba
             </div>
             <button
               type="button"
-              onClick={onSignOut}
+              onClick={() => setIsConfirmOpen(true)}
               className="mt-4 w-full rounded-2xl bg-white/5 border border-white/10 text-xs text-zinc-200 uppercase tracking-[0.2em] py-2 transition-colors hover:bg-white/10"
             >
               Sign Out
@@ -104,6 +106,52 @@ export function Sidebar({ currentView, setCurrentView, user, onSignOut }: Sideba
           </div>
         </div>
       </div>
+
+      <AnimatePresence>
+        {isConfirmOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsConfirmOpen(false)}
+            />
+
+            <motion.div
+              initial={{ opacity: 0, y: 16, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 16, scale: 0.98 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="fixed left-1/2 top-1/2 z-[80] w-[min(92vw,420px)] -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-white/10 bg-zinc-950/95 p-6 shadow-2xl"
+            >
+              <p className="text-sm tracking-[0.22em] uppercase text-emerald-400">Confirm Action</p>
+              <h3 className="mt-2 text-2xl font-bold text-white">Are you sure you want to sign out?</h3>
+              <p className="mt-2 text-sm text-zinc-400">You will need to sign in again to continue tracking your progress.</p>
+
+              <div className="mt-6 grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsConfirmOpen(false)}
+                  className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-medium text-zinc-200 transition-colors hover:bg-white/10"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsConfirmOpen(false);
+                    onSignOut();
+                  }}
+                  className="rounded-2xl border border-red-400/20 bg-red-500/20 px-4 py-3 text-sm font-semibold text-red-100 transition-colors hover:bg-red-500/30"
+                >
+                  Yes, Sign Out
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
