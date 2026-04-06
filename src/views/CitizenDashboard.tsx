@@ -5,6 +5,7 @@ import { Droplets, Wind, Recycle, Activity, ArrowUpRight, Leaf, Plus, Footprints
 import { LogActionModal } from '../components/LogActionModal';
 import type { AuthUser } from '../App';
 import { API_BASE } from '../lib/api';
+import { scopeReportsToAccount } from '../lib/utils';
 
 // Average-based impact factors sourced from official datasets.
 // - US EPA: Passenger vehicle emits ~404 g CO2 per mile -> ~0.251 kg CO2 per km.
@@ -189,9 +190,7 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
     if (savedWaste) setWasteReduced(parseFloat(savedWaste));
 
     const savedReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]');
-    const scopedReports = user?.id
-      ? savedReports.filter((report: any) => String(report?.ownerUserId || '') === user.id)
-      : [];
+    const scopedReports = scopeReportsToAccount(savedReports, user);
     const resolved = scopedReports.filter((report: any) => report.status === 'Resolved').length;
     const pending = scopedReports.filter((report: any) => report.status !== 'Resolved').length;
     

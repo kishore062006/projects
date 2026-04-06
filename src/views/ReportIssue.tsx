@@ -5,6 +5,7 @@ import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import * as L from 'leaflet';
 import type { AuthUser } from '../App';
 import { API_BASE } from '../lib/api';
+import { scopeReportsToAccount } from '../lib/utils';
 
 const AI_CATEGORIES = [
   'Water Leakage (SDG 6)',
@@ -334,9 +335,9 @@ export function ReportIssue({ user }: ReportIssueProps) {
       }
 
       if (useLocalFallback) {
-        const existingReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]') as Array<{ location?: string; ownerUserId?: string }>;
+        const existingReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]') as Array<{ location?: string; ownerUserId?: string; reporter?: string }>;
+        const currentUserReports = scopeReportsToAccount(existingReports, user);
         const currentUserId = user?.id || '';
-        const currentUserReports = existingReports.filter((report) => String(report.ownerUserId || '') === currentUserId);
         if (nextCoords) {
           const hasDuplicate = currentUserReports.some((report) => {
             const existingCoords = parseLocationInput(String(report?.location || ''));
@@ -382,9 +383,9 @@ export function ReportIssue({ user }: ReportIssueProps) {
     } catch (error) {
       useLocalFallback = true;
       const nextCoords = parseLocationInput(location);
-      const existingReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]') as Array<{ location?: string; ownerUserId?: string }>;
+      const existingReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]') as Array<{ location?: string; ownerUserId?: string; reporter?: string }>;
+      const currentUserReports = scopeReportsToAccount(existingReports, user);
       const currentUserId = user?.id || '';
-      const currentUserReports = existingReports.filter((report) => String(report.ownerUserId || '') === currentUserId);
       if (nextCoords) {
         const hasDuplicate = currentUserReports.some((report) => {
           const existingCoords = parseLocationInput(String(report?.location || ''));

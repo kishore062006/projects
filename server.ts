@@ -350,6 +350,33 @@ const parseCoordinates = (value: string): [number, number] | null => {
   return [lat, lng];
 };
 
+const normalizeIdentity = (value: unknown) => String(value || '').trim().toLowerCase();
+
+const getReportOwnerIdentitySet = (state: AppState, userId: string) => {
+  const identities = new Set<string>();
+  const user = state.users.find((item) => item.id === userId);
+
+  if (user) {
+    identities.add(normalizeIdentity(user.id));
+    identities.add(normalizeIdentity(user.name));
+    identities.add(normalizeIdentity(user.email));
+  }
+
+  identities.add(normalizeIdentity(userId));
+  return identities;
+};
+
+const reportBelongsToUser = (state: AppState, report: Report, userId: string) => {
+  const identities = getReportOwnerIdentitySet(state, userId);
+  const ownerUserId = normalizeIdentity(report.ownerUserId);
+  if (ownerUserId && identities.has(ownerUserId)) {
+    return true;
+  }
+
+  const reporter = normalizeIdentity(report.reporter);
+  return reporter ? identities.has(reporter) : false;
+};
+
 const areSameCoordinates = (a: [number, number], b: [number, number]) => {
   const precisionThreshold = 0.0001;
   return Math.abs(a[0] - b[0]) <= precisionThreshold && Math.abs(a[1] - b[1]) <= precisionThreshold;
@@ -1152,7 +1179,7 @@ async function startServer() {
         return res.json([]);
       }
 
-      const filteredReports = state.reports.filter((report) => String(report.ownerUserId || '') === requesterUserId);
+      const filteredReports = state.reports.filter((report) => reportBelongsToUser(state, report, requesterUserId));
       res.json(filteredReports);
     } catch (error) {
       handleStorageError(res, error);
@@ -1759,7 +1786,7 @@ async function startServer() {
       const visibleReports =
         role === 'admin'
           ? state.reports
-          : state.reports.filter((report) => String(report.ownerUserId || '') === userId);
+          : state.reports.filter((report) => reportBelongsToUser(state, report, userId));
       const resolvedCount = visibleReports.filter((report) => report.status === 'Resolved').length;
       const pendingCount = visibleReports.filter((report) => report.status !== 'Resolved').length;
       const totalCarbon = dashboard.graphData.reduce((sum, item) => sum + item.carbon, 0);

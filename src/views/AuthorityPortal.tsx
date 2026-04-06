@@ -4,6 +4,7 @@ import { MapPin, AlertCircle, CheckCircle, Clock, Filter, CheckSquare, List, X }
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import * as L from 'leaflet';
 import { API_BASE } from '../lib/api';
+import { scopeReportsToAccount } from '../lib/utils';
 
 // Fix for default Leaflet marker icons in React
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -101,7 +102,7 @@ export function AuthorityPortal() {
       }
 
       const savedReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]');
-      const normalizedReports = savedReports.map((issue: any) => ({
+      const normalizedReports = scopeReportsToAccount(savedReports, currentUser).map((issue: any) => ({
         ...issue,
         priority: getPriorityFromIssue(issue),
       }));
