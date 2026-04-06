@@ -1798,6 +1798,109 @@ async function startServer() {
     }
   });
 
+  app.post('/api/weekly-report', async (req: Request, res: Response) => {
+    const { role } = req.body as { role?: string };
+    if (role !== 'admin') {
+      return res.status(403).json({ message: 'Only admins can generate weekly reports.' });
+    }
+
+    try {
+      const state = await readState();
+      const now = new Date();
+      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+      // Calculate report statistics
+      const totalReports = state.reports.length;
+      const openReports = state.reports.filter(r => r.status === 'Open').length;
+      const resolvedReports = state.reports.filter(r => r.status === 'Resolved').length;
+
+      const reportsByType: Record<string, number> = {};
+      state.reports.forEach(report => {
+        reportsByType[report.type] = (reportsByType[report.type] || 0) + 1;
+      });
+
+      // Calculate total users and activity
+      const totalUsers = Object.keys(state.userDashboards).length;
+      const totalLeaves = Object.values(state.userDashboards).reduce((sum, dashboard) => sum + dashboard.points, 0);
+
+      // Aggregate carbon impact
+      const totalCarbonSaved = Object.values(state.userDashboards).reduce((sum, dashboard) => {
+        const weekTotal = dashboard.graphData.reduce((weekSum, day) => weekSum + day.carbon, 0);
+        return sum + weekTotal;
+      }, 0);
+
+      // Zone adoption stats
+      const adoptedZones = Object.keys(state.zoneAdoptions).length;
+      const totalZones = state.adoptionZones.length;
+
+      // Compile report text
+      const reportDate = new Date().toISOString().split('T')[0];
+      const reportText = `
+╔════════════════════════════════════════════════════════════════╗
+║         WEEKLY CITY PULSE REPORT - ${reportDate}                ║
+║              EcoSync Environmental Intelligence              ║
+╚════════════════════════════════════════════════════════════════╝
+
+📊 EXECUTIVE SUMMARY
+────────────────────────────────────────────────────────────────
+Generated: ${new Date().toISOString()}
+Report Period: Last 7 days
+
+🌍 ENVIRONMENTAL IMPACT
+────────────────────────────────────────────────────────────────
+Total Carbon Saved:        ${totalCarbonSaved.toFixed(2)} kg CO₂
+Active Users:              ${totalUsers}
+Total Leaves Earned:       ${totalLeaves}
+
+🚨 CIVIC ISSUE TRACKING
+────────────────────────────────────────────────────────────────
+Total Reports Filed:       ${totalReports}
+  • Open Issues:           ${openReports}
+  • Resolved Issues:       ${resolvedReports}
+  • Resolution Rate:       ${totalReports > 0 ? ((resolvedReports / totalReports) * 100).toFixed(1) : 0}%
+
+Issues by Category:
+${Object.entries(reportsByType)
+  .sort((a, b) => b[1] - a[1])
+  .map(([type, count]) => `  • ${type}: ${count}`)
+  .join('\n')}
+
+🌿 COMMUNITY ADOPTION ZONES
+────────────────────────────────────────────────────────────────
+Adopted Zones:             ${adoptedZones}/${totalZones}
+Adoption Rate:             ${totalZones > 0 ? ((adoptedZones / totalZones) * 100).toFixed(1) : 0}%
+
+📈 KEY METRICS
+────────────────────────────────────────────────────────────────
+Avg Reports/User:         ${(totalReports / (totalUsers || 1)).toFixed(2)}
+Avg Leaves/User:          ${(totalLeaves / (totalUsers || 1)).toFixed(0)}
+Avg Carbon Impact/User:    ${(totalCarbonSaved / (totalUsers || 1)).toFixed(2)} kg CO₂
+
+╔════════════════════════════════════════════════════════════════╗
+║  Next Week: Focus on increasing community participation and   ║
+║  resolving critical environmental issues.                    ║
+╚════════════════════════════════════════════════════════════════╝
+`;
+
+      res.json({
+        reportText,
+        stats: {
+          totalReports,
+          openReports,
+          resolvedReports,
+          totalUsers,
+          totalLeaves,
+          totalCarbonSaved,
+          adoptedZones,
+          totalZones,
+          reportsByType,
+        },
+      });
+    } catch (error) {
+      handleStorageError(res, error);
+    }
+  });
+
   app.use((req: Request, res: Response) => {
     res.status(404).json({ message: 'Route not found.' });
   });

@@ -73,6 +73,8 @@ export function AuthorityPortal() {
   const [selectedIssue, setSelectedIssue] = useState<any | null>(null);
   // ADDED: View mode state
   const [viewMode, setViewMode] = useState<'table' | 'map'>('table');
+  const [generatingReport, setGeneratingReport] = useState(false);
+  const [reportData, setReportData] = useState<any | null>(null);
 
   useEffect(() => {
     const loadIssues = async () => {
@@ -189,6 +191,35 @@ export function AuthorityPortal() {
     alert(`Ticket ${id} was removed by authority review.`);
   };
 
+  const handleGenerateWeeklyReport = async () => {
+    if (!API_BASE) return;
+    setGeneratingReport(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/weekly-report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: requesterRole }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setReportData(data);
+        // Trigger download
+        const element = document.createElement('a');
+        element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(data.reportText));
+        element.setAttribute('download', `city-pulse-report-${new Date().toISOString().split('T')[0]}.txt`);
+        element.style.display = 'none';
+        document.body.appendChild(element);
+        element.click();
+        document.body.removeChild(element);
+        alert('Weekly City Pulse Report generated and downloaded!');
+      }
+    } catch (error) {
+      alert('Failed to generate report. Please try again.');
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
   const openTicketsCount = issues.filter(i => i.status === 'Open').length;
   const resolvedTicketsCount = issues.filter(i => i.status === 'Resolved').length;
 
@@ -214,13 +245,14 @@ export function AuthorityPortal() {
         </div>
       </header>
 
-      <div className="flex gap-4 mb-6">
-        <button className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-sm hover:bg-zinc-800 transition-colors">
-          <Filter size={16} /> Filter by SDG
-        </button>
-        
-        {/* ADDED: View Toggle Buttons */}
-        <div className="flex bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
+      <div className="flex gap-4 mb-6 items-center justify-between">
+        <div className="flex gap-4">
+          <button className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-zinc-800 rounded-lg text-sm hover:bg-zinc-800 transition-colors">
+            <Filter size={16} /> Filter by SDG
+          </button>
+          
+          {/* ADDED: View Toggle Buttons */}
+          <div className="flex bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
           <button 
             onClick={() => setViewMode('table')}
             className={`flex items-center gap-2 px-4 py-2 text-sm transition-colors ${viewMode === 'table' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:bg-zinc-800/50'}`}
@@ -233,7 +265,17 @@ export function AuthorityPortal() {
           >
             <MapPin size={16} /> Map View
           </button>
+          </div>
         </div>
+        
+        {/* ADDED: Weekly Report Button */}
+        <button
+          onClick={handleGenerateWeeklyReport}
+          disabled={generatingReport}
+          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 border border-emerald-500 rounded-lg text-sm hover:bg-emerald-700 disabled:bg-zinc-700 disabled:border-zinc-600 transition-colors font-semibold"
+        >
+          {generatingReport ? '⏳ Generating...' : '📊 Weekly City Pulse Report'}
+        </button>
       </div>
 
       {/* ADDED: Conditional Rendering for Map vs Table */}
