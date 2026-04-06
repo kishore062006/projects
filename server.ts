@@ -141,6 +141,7 @@ const defaultWeeklyGraphData: Array<{ name: string; carbon: number }> = [
   { name: 'Saturday', carbon: 0 },
   { name: 'Sunday', carbon: 0 },
 ];
+const WEEKDAY_NAMES_MONDAY_FIRST = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] as const;
 
 type StateRow = {
   id: string;
@@ -668,9 +669,11 @@ async function startServer() {
           wasteReduced: 0,
           updatedAt: new Date(0).toISOString(),
         };
+        const dashboard = getOrCreateUserDashboard(state, userId);
 
         let nextWaterSaved = existing.waterSaved;
         let nextWasteReduced = existing.wasteReduced;
+        let nextGraphData = [...dashboard.graphData];
 
         if (categoryKey === 'water_leak') {
           nextWaterSaved += amount * IMPACT_FACTORS.WATER_SAVED_PER_REPORTED_LEAK_L;
@@ -680,6 +683,16 @@ async function startServer() {
         }
         if (categoryKey === 'cleanup') {
           nextWasteReduced += amount * IMPACT_FACTORS.WASTE_COLLECTED_PER_CLEANUP_HOUR_KG;
+        }
+        if (categoryKey === 'transit') {
+          const todayIndex = (new Date().getDay() + 6) % 7;
+          const todayName = WEEKDAY_NAMES_MONDAY_FIRST[todayIndex];
+          const carbonSaved = Number((amount * IMPACT_FACTORS.CAR_EMISSIONS_KG_CO2_PER_KM).toFixed(1));
+          nextGraphData = nextGraphData.map((entry) =>
+            entry.name === todayName
+              ? { ...entry, carbon: Number((entry.carbon + carbonSaved).toFixed(1)) }
+              : entry,
+          );
         }
 
         nextWaterSaved = Number(nextWaterSaved.toFixed(1));
@@ -698,8 +711,18 @@ async function startServer() {
               ...state.userMetrics,
               [userId]: nextMetrics,
             },
+            userDashboards: {
+              ...state.userDashboards,
+              [userId]: {
+                ...dashboard,
+                graphData: nextGraphData,
+              },
+            },
           },
-          result: nextMetrics,
+          result: {
+            ...nextMetrics,
+            graphData: nextGraphData,
+          },
         };
       });
 

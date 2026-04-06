@@ -526,6 +526,7 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
     const previousTotalPoints = totalPoints;
     const previousWaterSaved = waterSaved;
     const previousWasteReduced = wasteReduced;
+    const previousGraphData = graphData;
     
     setLogActionError('');
 
@@ -534,7 +535,7 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
       title,
       time: 'Just now',
       points,
-      type: 'user-logged'
+      type: categoryId,
     };
     
     const updatedActions = [newAction, ...recentActions].slice(0, 20); 
@@ -562,10 +563,23 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
     setWaterSaved(newWater);
     setWasteReduced(newWaste);
 
+    let nextGraphData = graphData;
+    if (categoryId === 'transit') {
+      const todayName = defaultGraphData[(new Date().getDay() + 6) % 7].name;
+      const carbonSaved = Number((amount * IMPACT_FACTORS.CAR_EMISSIONS_KG_CO2_PER_KM).toFixed(1));
+      nextGraphData = graphData.map((day) =>
+        day.name === todayName
+          ? { ...day, carbon: Number((day.carbon + carbonSaved).toFixed(1)) }
+          : day,
+      );
+      setGraphData(nextGraphData);
+    }
+
     localStorage.setItem('ecoActions', JSON.stringify(updatedActions));
     localStorage.setItem('ecoPoints', newTotalPoints.toString());
     localStorage.setItem('ecoWaterSaved', newWater.toString());
     localStorage.setItem('ecoWasteReduced', newWaste.toString());
+    localStorage.setItem('ecoGraphData', JSON.stringify(nextGraphData));
 
     const syncMetrics = async () => {
       if (!user?.id || !API_BASE) return;
@@ -586,12 +600,14 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
           setTotalPoints(previousTotalPoints);
           setWaterSaved(previousWaterSaved);
           setWasteReduced(previousWasteReduced);
+          setGraphData(previousGraphData);
           
           // Revert localStorage
           localStorage.setItem('ecoActions', JSON.stringify(previousActions));
           localStorage.setItem('ecoPoints', previousTotalPoints.toString());
           localStorage.setItem('ecoWaterSaved', previousWaterSaved.toString());
           localStorage.setItem('ecoWasteReduced', previousWasteReduced.toString());
+          localStorage.setItem('ecoGraphData', JSON.stringify(previousGraphData));
           
           // Show error notification
           setLogActionError(errorMessage);
@@ -607,6 +623,11 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
         if (typeof data?.wasteReduced === 'number') {
           setWasteReduced(data.wasteReduced);
           localStorage.setItem('ecoWasteReduced', String(data.wasteReduced));
+        }
+        if (Array.isArray(data?.graphData)) {
+          const normalized = normalizeGraphData(data.graphData);
+          setGraphData(normalized);
+          localStorage.setItem('ecoGraphData', JSON.stringify(normalized));
         }
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Network error while logging impact';
@@ -634,10 +655,12 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
           setTotalPoints(previousTotalPoints);
           setWaterSaved(previousWaterSaved);
           setWasteReduced(previousWasteReduced);
+          setGraphData(previousGraphData);
           localStorage.setItem('ecoActions', JSON.stringify(previousActions));
           localStorage.setItem('ecoPoints', previousTotalPoints.toString());
           localStorage.setItem('ecoWaterSaved', previousWaterSaved.toString());
           localStorage.setItem('ecoWasteReduced', previousWasteReduced.toString());
+          localStorage.setItem('ecoGraphData', JSON.stringify(previousGraphData));
 
           setLogActionError(errorMessage);
           alert(`⚠️ Action Not Recorded\n\n${errorMessage}`);
