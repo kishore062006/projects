@@ -102,6 +102,7 @@ type WalkStopResponse = {
   day: string;
   durationMinutes: number;
   aura: string;
+  verified?: boolean;
 };
 
 interface CitizenDashboardProps {
@@ -464,21 +465,36 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
       const verifiedDistanceKm = Number(payload.distanceKm || 0);
       const awardedLeaves = Number(payload.awardedLeaves || 0);
       const carbonSaved = Number(payload.carbonSaved || 0);
+      const isVerified = Boolean(payload.verified);
       const nextTotalPoints = totalPoints + awardedLeaves;
-      const nextActions = [
-        {
-          id: Date.now(),
-          title: `Verified walk: ${verifiedDistanceKm.toFixed(2)} km`,
-          time: 'Just now',
-          points: `+${awardedLeaves}`,
-          type: 'verified-walk',
-        },
-        ...recentActions,
-      ].slice(0, 5);
 
-      const nextGraphData = graphData.map((day) =>
-        day.name === payload.day ? { ...day, carbon: Number((day.carbon + carbonSaved).toFixed(1)) } : day,
-      );
+      const nextActions = isVerified
+        ? [
+            {
+              id: Date.now(),
+              title: `Verified walk: ${verifiedDistanceKm.toFixed(2)} km`,
+              time: 'Just now',
+              points: awardedLeaves,
+              type: 'verified-walk',
+            },
+            ...recentActions,
+          ].slice(0, 20)
+        : [
+            {
+              id: Date.now(),
+              title: 'Walk session stopped without verification',
+              time: 'Just now',
+              points: 0,
+              type: 'walk-stopped',
+            },
+            ...recentActions,
+          ].slice(0, 20);
+
+      const nextGraphData = isVerified
+        ? graphData.map((day) =>
+            day.name === payload.day ? { ...day, carbon: Number((day.carbon + carbonSaved).toFixed(1)) } : day,
+          )
+        : graphData;
 
       setTotalPoints(nextTotalPoints);
       setRecentActions(nextActions);
@@ -488,7 +504,11 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
       walkSessionRef.current = null;
       setWalkPoints([]);
       setWalkEstimatedKm(0);
-      setWalkStatus(`Verified by server. You earned ${awardedLeaves} Leaves for ${verifiedDistanceKm.toFixed(2)} km.`);
+      setWalkStatus(
+        isVerified
+          ? `Verified by server. You earned ${awardedLeaves} Leaves for ${verifiedDistanceKm.toFixed(2)} km.`
+          : 'Walk session stopped. No Leaves were awarded because the session did not meet verification rules.',
+      );
       localStorage.setItem('ecoPoints', String(nextTotalPoints));
       localStorage.setItem('ecoActions', JSON.stringify(nextActions));
       localStorage.setItem('ecoGraphData', JSON.stringify(nextGraphData));

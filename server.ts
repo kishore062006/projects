@@ -995,48 +995,42 @@ async function startServer() {
 
         const nowIso = new Date().toISOString();
         const allPoints = [session.startPoint, ...session.points];
-        if (allPoints.length < 2) {
-          throw new Error('NOT_ENOUGH_DATA');
-        }
-
         const startTime = new Date(session.startedAt).getTime();
         const endTime = new Date(nowIso).getTime();
         const durationMs = endTime - startTime;
-        if (durationMs < WALK_MIN_DURATION_MS) {
-          throw new Error('WALK_TOO_SHORT');
-        }
+        const metrics = allPoints.length >= 2 ? calculateRouteMetrics(allPoints) : { distanceKm: 0, maxSpeedKmh: 0, minSegmentSeconds: 0, orderedPoints: allPoints };
 
-        const metrics = calculateRouteMetrics(allPoints);
-        if (metrics.distanceKm < WALK_MIN_DISTANCE_KM) {
-          throw new Error('WALK_TOO_SHORT');
-        }
-        if (metrics.maxSpeedKmh > WALK_MAX_SPEED_KMH) {
-          throw new Error('IMPOSSIBLE_MOVEMENT');
-        }
+        const isValidWalk =
+          allPoints.length >= 2 &&
+          durationMs >= WALK_MIN_DURATION_MS &&
+          metrics.distanceKm >= WALK_MIN_DISTANCE_KM &&
+          metrics.maxSpeedKmh <= WALK_MAX_SPEED_KMH;
 
-        const awardedLeaves = Math.max(1, Math.floor(metrics.distanceKm * WALK_POINTS_PER_KM));
-        const carbonSaved = Number((metrics.distanceKm * IMPACT_FACTORS.CAR_EMISSIONS_KG_CO2_PER_KM).toFixed(1));
+        const awardedLeaves = isValidWalk ? Math.max(1, Math.floor(metrics.distanceKm * WALK_POINTS_PER_KM)) : 0;
+        const carbonSaved = isValidWalk ? Number((metrics.distanceKm * IMPACT_FACTORS.CAR_EMISSIONS_KG_CO2_PER_KM).toFixed(1)) : 0;
         const dashboard = getOrCreateUserDashboard(state, targetUserId);
-        const nextDashboard: UserDashboardState = {
-          ...dashboard,
-          points: dashboard.points + awardedLeaves,
-          actions: [
-            {
-              id: Date.now() + 5,
-              title: `Verified walk: ${metrics.distanceKm.toFixed(2)} km`,
-              time: 'Just now',
-              points: awardedLeaves,
-              type: 'verified-walk',
-              userId: targetUserId,
-            },
-            ...dashboard.actions,
-          ],
-          graphData: dashboard.graphData.map((entry) =>
-            entry.name === session.day
-              ? { ...entry, carbon: Number((entry.carbon + carbonSaved).toFixed(1)) }
-              : entry,
-          ),
-        };
+        const nextDashboard: UserDashboardState = isValidWalk
+          ? {
+              ...dashboard,
+              points: dashboard.points + awardedLeaves,
+              actions: [
+                {
+                  id: Date.now() + 5,
+                  title: `Verified walk: ${metrics.distanceKm.toFixed(2)} km`,
+                  time: 'Just now',
+                  points: awardedLeaves,
+                  type: 'verified-walk',
+                  userId: targetUserId,
+                },
+                ...dashboard.actions,
+              ],
+              graphData: dashboard.graphData.map((entry) =>
+                entry.name === session.day
+                  ? { ...entry, carbon: Number((entry.carbon + carbonSaved).toFixed(1)) }
+                  : entry,
+              ),
+            }
+          : dashboard;
 
         const nextWalkSessions = { ...state.walkSessions };
         delete nextWalkSessions[targetUserId];
@@ -1058,6 +1052,7 @@ async function startServer() {
             day: session.day,
             durationMinutes: Number((durationMs / 60000).toFixed(1)),
             aura: 'green',
+            verified: isValidWalk,
           },
         };
       });
@@ -1066,15 +1061,6 @@ async function startServer() {
     } catch (error) {
       if (error instanceof Error && error.message === 'SESSION_NOT_FOUND') {
         return res.status(404).json({ message: 'No active walk session found.' });
-      }
-      if (error instanceof Error && error.message === 'NOT_ENOUGH_DATA') {
-        return res.status(400).json({ message: 'Not enough GPS data captured.' });
-      }
-      if (error instanceof Error && error.message === 'WALK_TOO_SHORT') {
-        return res.status(400).json({ message: 'Walk too short to verify. Please walk for at least 5 minutes.' });
-      }
-      if (error instanceof Error && error.message === 'IMPOSSIBLE_MOVEMENT') {
-        return res.status(400).json({ message: 'Movement looks invalid. Please walk naturally and keep GPS on.' });
       }
       handleStorageError(res, error);
     }

@@ -15,12 +15,20 @@ export function LogActionModal({ isOpen, onClose, onLogAction }: LogActionModalP
   const [amount, setAmount] = useState('');
 
   const categories = [
-    { id: 'water_leak', label: 'Reported Water Leak', icon: Droplets, color: 'text-cyan-400', bg: 'bg-cyan-400/10', border: 'border-cyan-400/20', unit: 'leaks reported', pointsPerUnit: 50 },
+    { id: 'water_leak', label: 'Reported Water Leak', icon: Droplets, color: 'text-cyan-400', bg: 'bg-cyan-400/10', border: 'border-cyan-400/20', unit: 'leaks reported', pointsPerUnit: 20 },
     { id: 'transit', label: 'Transit Trailblazer', icon: Bus, color: 'text-indigo-400', bg: 'bg-indigo-400/10', border: 'border-indigo-400/20', unit: 'km traveled', pointsPerUnit: 10 },
-    { id: 'cleanup', label: 'Community Cleanup', icon: Recycle, color: 'text-teal-400', bg: 'bg-teal-400/10', border: 'border-teal-400/20', unit: 'hours spent', pointsPerUnit: 100 },
+    { id: 'cleanup', label: 'Community Cleanup', icon: Recycle, color: 'text-teal-400', bg: 'bg-teal-400/10', border: 'border-teal-400/20', unit: 'hours spent', pointsPerUnit: 20 },
     { id: 'groceries', label: 'Zero Waste Groceries', icon: ShoppingBag, color: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/20', unit: 'bags saved', pointsPerUnit: 25 },
     { id: 'carbon', label: 'Green Transit', icon: Wind, color: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/20', unit: 'km traveled', pointsPerUnit: 5 },
   ];
+
+  const dailyCaps: Record<string, number> = {
+    water_leak: 5,
+    cleanup: 5,
+    groceries: 5,
+    transit: 20,
+    carbon: 30,
+  };
 
   const handleLog = (e: React.FormEvent) => {
     e.preventDefault();
@@ -102,6 +110,9 @@ export function LogActionModal({ isOpen, onClose, onLogAction }: LogActionModalP
                 <p className="text-zinc-400 mb-8">
                   How many {categories.find(c => c.id === category)?.unit} did you achieve?
                 </p>
+                <p className="text-xs text-zinc-500 mb-4">
+                  Daily limit: {dailyCaps[category] ?? 5} units for this category.
+                </p>
 
                 <div className="mb-8">
                   <div className="relative flex items-center">
@@ -109,6 +120,7 @@ export function LogActionModal({ isOpen, onClose, onLogAction }: LogActionModalP
                       type="number" 
                       required
                       min="1"
+                      max={dailyCaps[category] ?? 5}
                       value={amount}
                       onChange={(e) => setAmount(e.target.value)}
                       className="w-full bg-white/[0.03] border border-white/10 rounded-2xl px-6 py-4 text-4xl font-bold text-white focus:outline-none focus:border-emerald-500 transition-colors"
@@ -126,6 +138,7 @@ export function LogActionModal({ isOpen, onClose, onLogAction }: LogActionModalP
                 >
                   Log Impact & Earn Leaves
                 </button>
+                <p className="text-[11px] text-zinc-500 mt-3 text-center">Daily Log Impact Leaves cap: 150</p>
               </motion.form>
             )}
 
