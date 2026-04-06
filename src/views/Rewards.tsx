@@ -58,6 +58,7 @@ export function Rewards({ user }: RewardsProps) {
   const [adoptionZones, setAdoptionZones] = useState<AdoptionZone[]>([]);
   const [adoptionStatus, setAdoptionStatus] = useState<AdoptionStatusResponse | null>(null);
   const [isAdoptionBusy, setIsAdoptionBusy] = useState(false);
+  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
 
   useEffect(() => {
     const savedPoints = localStorage.getItem('ecoPoints');
@@ -227,6 +228,7 @@ export function Rewards({ user }: RewardsProps) {
 
   const bucketBathProgress = Math.min(7, Math.floor(waterSaved / CHALLENGE_FACTORS.BUCKET_BATH_DAILY_WATER_LITERS));
   const transitTrailblazerProgress = Math.min(5, transitDays);
+  const selectedZone = adoptionZones.find((zone) => zone.id === selectedZoneId) || null;
 
   // ADDED: Redeem Logic
   const handleRedeem = (cost: number, rewardName: string) => {
@@ -392,6 +394,29 @@ export function Rewards({ user }: RewardsProps) {
           Open pollution or damage reports inside your zone turn your aura red.
         </p>
 
+        <div className="mb-4 flex flex-wrap items-center gap-4 text-sm">
+          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-500/15 px-3 py-1 text-emerald-200">
+            <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+            Green Zone: Healthy
+          </div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-red-400/30 bg-red-500/15 px-3 py-1 text-red-200">
+            <span className="h-2.5 w-2.5 rounded-full bg-red-400" />
+            Red Zone: Alert
+          </div>
+        </div>
+
+        {selectedZone && (
+          <div className="mb-6 rounded-2xl border border-[#D4AF37]/25 bg-[#1A050C] p-4">
+            <p className="text-xs uppercase tracking-widest text-white/60 mb-1">Selected Zone</p>
+            <p className="text-white font-medium">{selectedZone.name}</p>
+            <p className={selectedZone.health === 'healthy' ? 'text-emerald-300 text-sm mt-1' : 'text-red-300 text-sm mt-1'}>
+              {selectedZone.health === 'healthy'
+                ? 'Status: Green (Healthy)'
+                : `Status: Red (Alert) - ${selectedZone.openIssueCount} open issues`}
+            </p>
+          </div>
+        )}
+
         <div className="bg-[#1A050C] border border-[#D4AF37]/20 rounded-2xl p-5 mb-6">
           {adoptionStatus?.hasAdoption ? (
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
@@ -426,13 +451,22 @@ export function Rewards({ user }: RewardsProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-8">
           {adoptionZones.map((zone) => {
             const isTakenByOther = Boolean(zone.adoptedByUserId && !zone.isOwnedByCurrentUser);
+            const isSelected = selectedZoneId === zone.id;
             return (
-              <div key={zone.id} className="bg-[#3D101D] rounded-2xl border border-[#D4AF37]/20 p-5">
+              <div
+                key={zone.id}
+                onClick={() => setSelectedZoneId(zone.id)}
+                className={`cursor-pointer bg-[#3D101D] rounded-2xl border p-5 transition-all ${
+                  isSelected
+                    ? 'ring-2 ring-[#D4AF37]/70 shadow-[0_0_0_1px_rgba(212,175,55,0.45)]'
+                    : ''
+                } ${zone.health === 'healthy' ? 'border-emerald-500/40' : 'border-red-500/40'}`}
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-white font-medium">{zone.name}</p>
                     <p className="text-white/60 text-sm capitalize mt-1">{zone.type} • Radius {zone.radiusKm} km</p>
-                    <p className={zone.health === 'healthy' ? 'text-emerald-400 text-sm mt-2' : 'text-red-400 text-sm mt-2'}>
+                    <p className={zone.health === 'healthy' ? 'text-emerald-300 text-sm mt-2' : 'text-red-300 text-sm mt-2'}>
                       {zone.health === 'healthy' ? 'Healthy zone' : `Alert: ${zone.openIssueCount} open issues`}
                     </p>
                   </div>
