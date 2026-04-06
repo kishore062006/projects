@@ -16,6 +16,17 @@ const fallbackCategoryFromImage = (imageDataUrl: string) => {
   return AI_CATEGORIES[index];
 };
 
+const fallbackDetailsByCategory: Record<(typeof AI_CATEGORIES)[number], string> = {
+  'Water Leakage (SDG 6)':
+    'Visible signs suggest possible continuous water loss. Check for active flow, nearby pooling, and whether pedestrian movement is affected.',
+  'Illegal Dumping (SDG 11)':
+    'Likely unmanaged solid waste is visible. Note waste spread, blockage risk, and proximity to homes or walkways for faster cleanup response.',
+  'Polluted Water Body (SDG 6)':
+    'Water quality may be compromised based on visible cues. Verify discoloration, floating debris, and any nearby discharge source.',
+  'Damaged Green Infrastructure (SDG 13)':
+    'The image suggests stress or damage in green infrastructure. Check structural condition, extent of impact, and immediate public safety concerns.',
+};
+
 type ReportIssueProps = {
   user: AuthUser | null;
 };
@@ -111,7 +122,7 @@ export function ReportIssue({ user }: ReportIssueProps) {
       setDescription(
         buildAnalysisText(
           `AI-assisted fallback: Potential ${detectedCategory.split('(')[0].trim()} spotted in the image.`,
-          'Additional details were unavailable from the AI service, so please review the image manually for nearby damage, obstruction, or safety risks.',
+          fallbackDetailsByCategory[detectedCategory],
         ),
       );
       setIsAITagging(false);
