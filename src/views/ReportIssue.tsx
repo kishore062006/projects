@@ -213,7 +213,7 @@ export function ReportIssue({ user }: ReportIssueProps) {
       }
       setDescription(
         buildAnalysisText(
-          `AI analysis is temporarily unavailable. Please review the selected category manually before submitting.`,
+          '',
           fallbackDetailsByCategory[detectedCategory],
         ),
       );
