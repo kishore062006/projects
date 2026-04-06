@@ -13,9 +13,11 @@ const AI_CATEGORIES = [
   'Damaged Green Infrastructure (SDG 13)',
 ] as const;
 
-const fallbackCategoryFromImage = (imageDataUrl: string) => {
-  const index = imageDataUrl.length % AI_CATEGORIES.length;
-  return AI_CATEGORIES[index];
+const getFallbackCategory = (hintCategory: string | null) => {
+  if (hintCategory && AI_CATEGORIES.includes(hintCategory as (typeof AI_CATEGORIES)[number])) {
+    return hintCategory as (typeof AI_CATEGORIES)[number];
+  }
+  return 'Damaged Green Infrastructure (SDG 13)';
 };
 
 const fallbackDetailsByCategory: Record<(typeof AI_CATEGORIES)[number], string> = {
@@ -200,7 +202,7 @@ export function ReportIssue({ user }: ReportIssueProps) {
     };
 
     const applyFallback = () => {
-      const detectedCategory = fallbackCategoryFromImage(imageDataUrl);
+      const detectedCategory = getFallbackCategory(category);
       setCategory(detectedCategory);
       setDescription(
         buildAnalysisText(
@@ -220,7 +222,7 @@ export function ReportIssue({ user }: ReportIssueProps) {
       const response = await fetch(`${API_BASE}/api/ai/report-analysis`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageDataUrl }),
+        body: JSON.stringify({ imageDataUrl, hintCategory: category }),
       });
 
       if (!response.ok) {
@@ -231,7 +233,7 @@ export function ReportIssue({ user }: ReportIssueProps) {
       const data = (await response.json()) as { category?: string; description?: string; additionalDetails?: string };
       const detectedCategory = AI_CATEGORIES.includes((data.category || '') as (typeof AI_CATEGORIES)[number])
         ? (data.category as (typeof AI_CATEGORIES)[number])
-        : fallbackCategoryFromImage(imageDataUrl);
+        : getFallbackCategory(category);
 
       setCategory(detectedCategory);
       setDescription(
@@ -358,14 +360,14 @@ export function ReportIssue({ user }: ReportIssueProps) {
           id: Date.now(),
           title: `Reported ${reportToStore.type}`,
           time: 'Just now',
-          points: '+50',
+          points: '+10',
           type: 'report'
         };
         const existingActions = JSON.parse(localStorage.getItem('ecoActions') || '[]');
         localStorage.setItem('ecoActions', JSON.stringify([newAction, ...existingActions]));
 
         const currentPoints = parseInt(localStorage.getItem('ecoPoints') || '0');
-        localStorage.setItem('ecoPoints', (currentPoints + 50).toString());
+        localStorage.setItem('ecoPoints', (currentPoints + 10).toString());
       }
     } catch (error) {
       console.error("Failed to save report", error);
@@ -403,7 +405,7 @@ export function ReportIssue({ user }: ReportIssueProps) {
               <AlertTriangle size={40} />
             </motion.div>
             <h2 className="text-2xl font-bold mb-2 tracking-tight">Issue Reported!</h2>
-            <p className="text-zinc-400 mb-8 leading-relaxed">Thank you for being an Eco Warden. The municipal authority has been notified. You earned 50 Leaves!</p>
+            <p className="text-zinc-400 mb-8 leading-relaxed">Thank you for being an Eco Warden. The municipal authority has been notified.</p>
             <button 
               onClick={() => {
                 setSubmitted(false);

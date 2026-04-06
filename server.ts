@@ -30,6 +30,7 @@ type Action = {
   points: number;
   type: string;
   userId?: string;
+  createdAt?: string;
 };
 
 type UserDashboardState = {
@@ -42,6 +43,7 @@ type WalkPoint = {
   lat: number;
   lng: number;
   timestamp: string;
+  accuracyMeters?: number;
 };
 
 type WalkSession = {
@@ -165,29 +167,49 @@ const REPORT_CATEGORIES = [
   'Damaged Green Infrastructure (SDG 13)',
 ] as const;
 
+const mapModelCategory = (rawCategory: string, hintCategory?: string): (typeof REPORT_CATEGORIES)[number] => {
+  const normalized = String(rawCategory || '').trim().toLowerCase();
+  if (REPORT_CATEGORIES.includes(rawCategory as (typeof REPORT_CATEGORIES)[number])) {
+    return rawCategory as (typeof REPORT_CATEGORIES)[number];
+  }
+
+  if (normalized.includes('water leak') || normalized.includes('leakage') || normalized.includes('pipe burst')) {
+    return 'Water Leakage (SDG 6)';
+  }
+  if (normalized.includes('dump') || normalized.includes('garbage') || normalized.includes('trash') || normalized.includes('waste pile')) {
+    return 'Illegal Dumping (SDG 11)';
+  }
+  if (normalized.includes('pollut') || normalized.includes('sewage') || normalized.includes('dirty water') || normalized.includes('water body')) {
+    return 'Polluted Water Body (SDG 6)';
+  }
+  if (normalized.includes('tree') || normalized.includes('green') || normalized.includes('park') || normalized.includes('infrastructure')) {
+    return 'Damaged Green Infrastructure (SDG 13)';
+  }
+
+  if (hintCategory && REPORT_CATEGORIES.includes(hintCategory as (typeof REPORT_CATEGORIES)[number])) {
+    return hintCategory as (typeof REPORT_CATEGORIES)[number];
+  }
+  return 'Damaged Green Infrastructure (SDG 13)';
+};
+
 const PASSIVE_POINTS_PER_HOUR = 20;
 const PASSIVE_AWARD_WINDOW_MS = 15 * 60 * 1000;
 const WALK_MIN_DURATION_MS = 5 * 60 * 1000;
 const WALK_MAX_SPEED_KMH = 12;
 const WALK_MIN_DISTANCE_KM = 0.15;
 const WALK_POINTS_PER_KM = 5;
+const WALK_MIN_MOVEMENT_KM = 0.012;
+const WALK_MAX_GPS_ACCURACY_METERS = 35;
 
-// Server-side action points (clients cannot specify points directly)
-const VALID_ACTIONS: Record<string, number> = {
-  'saved-energy': 25,
-  'recycled': 15,
-  'used-transit': 20,
-  'carpooled': 30,
-  'planted-tree': 40,
-  'participated-cleanup': 35,
+// Server-authoritative log-impact rules.
+const IMPACT_ACTION_RULES: Record<string, { pointsPerUnit: number; dailyUnitCap: number }> = {
+  water_leak: { pointsPerUnit: 20, dailyUnitCap: 5 },
+  cleanup: { pointsPerUnit: 20, dailyUnitCap: 5 },
+  groceries: { pointsPerUnit: 25, dailyUnitCap: 5 },
+  transit: { pointsPerUnit: 10, dailyUnitCap: 20 },
+  carbon: { pointsPerUnit: 5, dailyUnitCap: 30 },
 };
-
-// Daily caps per impact category to prevent farming
-const IMPACT_CATEGORY_DAILY_CAPS: Record<string, number> = {
-  'water_leak': 5,
-  'groceries': 10,
-  'cleanup': 3,
-};
+const LOG_IMPACT_DAILY_LEAVES_CAP = 150;
 
 // Report limits
 const REPORT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 1 report per day
@@ -611,14 +633,14 @@ async function startServer() {
       return res.status(400).json({ message: 'Valid userId, categoryId, and amount are required.' });
     }
 
-    // Validate amount against daily cap
-    const dailyCap = IMPACT_CATEGORY_DAILY_CAPS[categoryId as keyof typeof IMPACT_CATEGORY_DAILY_CAPS];
-    if (!dailyCap) {
-      return res.status(400).json({ message: `Invalid category '${categoryId}'. Valid categories: ${Object.keys(IMPACT_CATEGORY_DAILY_CAPS).join(', ')}` });
+    const categoryKey = String(categoryId).trim().toLowerCase();
+    const rule = IMPACT_ACTION_RULES[categoryKey];
+    if (!rule) {
+      return res.status(400).json({ message: `Invalid category '${categoryId}'. Valid categories: ${Object.keys(IMPACT_ACTION_RULES).join(', ')}` });
     }
 
-    if (amount > dailyCap) {
-      return res.status(429).json({ message: `Daily cap for '${categoryId}' is ${dailyCap}. You requested ${amount}.` });
+    if (amount > rule.dailyUnitCap) {
+      return res.status(429).json({ message: `Daily unit cap for '${categoryKey}' is ${rule.dailyUnitCap}. You requested ${amount}.` });
     }
 
     try {
@@ -629,27 +651,16 @@ async function startServer() {
           updatedAt: new Date(0).toISOString(),
         };
 
-        // Check daily cap by counting logs from today
-        const today = new Date().toISOString().split('T')[0];
-        const todayLogs = (state.actions || [])
-          .filter((action) => action.userId === userId && action.type === `impact-log-${categoryId}`)
-          .filter((action) => action.time.includes(today))
-          .length;
-
-        if (todayLogs >= dailyCap) {
-          throw new Error(`DAILY_CAP_EXCEEDED_${categoryId}`);
-        }
-
         let nextWaterSaved = existing.waterSaved;
         let nextWasteReduced = existing.wasteReduced;
 
-        if (categoryId === 'water_leak') {
+        if (categoryKey === 'water_leak') {
           nextWaterSaved += amount * IMPACT_FACTORS.WATER_SAVED_PER_REPORTED_LEAK_L;
         }
-        if (categoryId === 'groceries') {
+        if (categoryKey === 'groceries') {
           nextWasteReduced += amount * IMPACT_FACTORS.WASTE_AVOIDED_PER_GROCERY_ACTION_KG;
         }
-        if (categoryId === 'cleanup') {
+        if (categoryKey === 'cleanup') {
           nextWasteReduced += amount * IMPACT_FACTORS.WASTE_COLLECTED_PER_CLEANUP_HOUR_KG;
         }
 
@@ -676,11 +687,6 @@ async function startServer() {
 
       res.json(metrics);
     } catch (error) {
-      if (error instanceof Error && error.message.startsWith('DAILY_CAP_EXCEEDED_')) {
-        const category = error.message.replace('DAILY_CAP_EXCEEDED_', '');
-        const cap = IMPACT_CATEGORY_DAILY_CAPS[category as keyof typeof IMPACT_CATEGORY_DAILY_CAPS];
-        return res.status(429).json({ message: `Daily cap of ${cap} reached for '${category}'. Try again tomorrow.` });
-      }
       handleStorageError(res, error);
     }
   });
@@ -753,19 +759,25 @@ async function startServer() {
   });
 
   app.post('/api/actions', async (req: Request, res: Response) => {
-    const { title, type, userId } = req.body;
-    if (!title || !type || !userId) {
-      return res.status(400).json({ message: 'Invalid action payload. userId, title, and type are required.' });
+    const { title, type, userId, amount } = req.body;
+    if (!title || !type || !userId || typeof amount !== 'number' || amount <= 0) {
+      return res.status(400).json({ message: 'Invalid action payload. userId, title, type, and a positive amount are required.' });
     }
 
-    // Server-side point validation - clients cannot specify arbitrary points
     const actionType = String(type).toLowerCase().trim();
-    const serverPoints = VALID_ACTIONS[actionType];
-    if (typeof serverPoints !== 'number') {
-      return res.status(400).json({ message: `Invalid action type "${actionType}". Valid types: ${Object.keys(VALID_ACTIONS).join(', ')}` });
+    const rule = IMPACT_ACTION_RULES[actionType];
+    if (!rule) {
+      return res.status(400).json({ message: `Invalid action type "${actionType}". Valid types: ${Object.keys(IMPACT_ACTION_RULES).join(', ')}` });
     }
+
+    if (amount > rule.dailyUnitCap) {
+      return res.status(429).json({ message: `Daily unit cap for '${actionType}' is ${rule.dailyUnitCap}.` });
+    }
+
+    const serverPoints = Math.max(1, Math.floor(amount * rule.pointsPerUnit));
 
     try {
+      const nowIso = new Date().toISOString();
       const action: Action = {
         id: Date.now(),
         title,
@@ -773,11 +785,22 @@ async function startServer() {
         points: serverPoints,
         type: actionType,
         userId: String(userId),
+        createdAt: nowIso,
       };
 
       await mutateState((state) => {
         const targetUserId = String(userId);
         const dashboard = getOrCreateUserDashboard(state, targetUserId);
+        const startOfDayIso = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+        const todayImpactLeaves = dashboard.actions
+          .filter((existingAction) => Boolean(existingAction.createdAt && existingAction.createdAt >= startOfDayIso))
+          .filter((existingAction) => Boolean(IMPACT_ACTION_RULES[String(existingAction.type || '').toLowerCase()]))
+          .reduce((sum, existingAction) => sum + Number(existingAction.points || 0), 0);
+
+        if (todayImpactLeaves + serverPoints > LOG_IMPACT_DAILY_LEAVES_CAP) {
+          throw new Error('LOG_IMPACT_DAILY_LEAVES_CAP_EXCEEDED');
+        }
+
         const nextDashboard: UserDashboardState = {
           ...dashboard,
           points: dashboard.points + serverPoints,
@@ -798,6 +821,9 @@ async function startServer() {
 
       res.status(201).json(action);
     } catch (error) {
+      if (error instanceof Error && error.message === 'LOG_IMPACT_DAILY_LEAVES_CAP_EXCEEDED') {
+        return res.status(429).json({ message: `Daily Leaves cap for Log Impact is ${LOG_IMPACT_DAILY_LEAVES_CAP}. Try again tomorrow.` });
+      }
       handleStorageError(res, error);
     }
   });
@@ -876,7 +902,15 @@ async function startServer() {
           lat: Number(point.lat),
           lng: Number(point.lng),
           timestamp: point.timestamp ? String(point.timestamp) : new Date().toISOString(),
+          accuracyMeters:
+            typeof point.accuracyMeters === 'number' && Number.isFinite(point.accuracyMeters)
+              ? Number(point.accuracyMeters)
+              : undefined,
         };
+
+        if (typeof nextPoint.accuracyMeters === 'number' && nextPoint.accuracyMeters > WALK_MAX_GPS_ACCURACY_METERS) {
+          throw new Error('LOW_GPS_ACCURACY');
+        }
 
         const segmentDistance = haversineKm([lastPoint.lat, lastPoint.lng], [nextPoint.lat, nextPoint.lng]);
         const elapsedMs = new Date(nextPoint.timestamp).getTime() - new Date(lastPoint.timestamp).getTime();
@@ -890,11 +924,26 @@ async function startServer() {
           throw new Error('IMPOSSIBLE_MOVEMENT');
         }
 
+        // Ignore tiny drift when user is stationary.
+        if (segmentDistance < WALK_MIN_MOVEMENT_KM) {
+          const metrics = calculateRouteMetrics([current.startPoint, ...current.points]);
+          return {
+            nextState: state,
+            result: {
+              ...getWalkSessionSummary(current),
+              accepted: false,
+              trackedDistanceKm: Number(metrics.distanceKm.toFixed(3)),
+            },
+          };
+        }
+
         const nextSession: WalkSession = {
           ...current,
           updatedAt: nextPoint.timestamp,
           points: [...current.points, nextPoint],
         };
+
+        const nextMetrics = calculateRouteMetrics([nextSession.startPoint, ...nextSession.points]);
 
         return {
           nextState: {
@@ -904,7 +953,11 @@ async function startServer() {
               [targetUserId]: nextSession,
             },
           },
-          result: getWalkSessionSummary(nextSession),
+          result: {
+            ...getWalkSessionSummary(nextSession),
+            accepted: true,
+            trackedDistanceKm: Number(nextMetrics.distanceKm.toFixed(3)),
+          },
         };
       });
 
@@ -918,6 +971,9 @@ async function startServer() {
       }
       if (error instanceof Error && error.message === 'IMPOSSIBLE_MOVEMENT') {
         return res.status(400).json({ message: 'Movement looks invalid. Please walk naturally and keep GPS on.' });
+      }
+      if (error instanceof Error && error.message === 'LOW_GPS_ACCURACY') {
+        return res.status(400).json({ message: 'GPS signal is weak. Move to open sky and continue walking.' });
       }
       handleStorageError(res, error);
     }
@@ -1438,7 +1494,7 @@ async function startServer() {
   });
 
   app.post('/api/ai/report-analysis', async (req: Request, res: Response) => {
-    const { imageDataUrl } = req.body as { imageDataUrl?: string };
+    const { imageDataUrl, hintCategory } = req.body as { imageDataUrl?: string; hintCategory?: string };
     if (!imageDataUrl || typeof imageDataUrl !== 'string') {
       return res.status(400).json({ message: 'imageDataUrl is required.' });
     }
@@ -1454,11 +1510,14 @@ async function startServer() {
 
     const prompt = [
       'You are classifying a civic/environmental issue from an image.',
+      'Use only visible evidence from the image and do not invent unseen details.',
       'Describe what is visibly in the image and provide useful report-ready context.',
+      hintCategory ? `User selected category hint: ${hintCategory}. Use this only if consistent with image evidence.` : '',
       `Choose one category only from: ${REPORT_CATEGORIES.join(', ')}.`,
       'Return strict JSON only with keys: category, description, additionalDetails.',
       'description must be 1-2 concise sentences for a municipal issue report.',
       'additionalDetails must add 1-3 concise sentences with visible clues, likely cause, and urgency.',
+      'If uncertain, pick the closest visible category and clearly state uncertainty in additionalDetails.',
     ].join(' ');
 
     try {
@@ -1486,10 +1545,8 @@ async function startServer() {
         return res.status(502).json({ message: 'Gemini returned an invalid response format.' });
       }
 
-      const rawCategory = String(parsed.category || '').trim() as ReportCategory;
-      const category = REPORT_CATEGORIES.includes(rawCategory)
-        ? rawCategory
-        : 'Damaged Green Infrastructure (SDG 13)';
+      const rawCategory = String(parsed.category || '').trim();
+      const category = mapModelCategory(rawCategory, hintCategory);
       const fallbackDescription = `Potential ${category.split('(')[0].trim()} identified in the uploaded image. Please verify severity on-site.`;
       const description = String(parsed.description || '').trim() || fallbackDescription;
       const additionalDetails =

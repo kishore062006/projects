@@ -68,6 +68,20 @@ type WalkPoint = {
   lat: number;
   lng: number;
   timestamp: string;
+  accuracyMeters?: number;
+};
+
+type WalkTrackResponse = {
+  sessionId: string;
+  userId: string;
+  day: string;
+  startedAt: string;
+  updatedAt: string;
+  startPoint: WalkPoint;
+  sampleCount: number;
+  accepted?: boolean;
+  trackedDistanceKm?: number;
+  message?: string;
 };
 
 type WalkSessionSummary = {
@@ -112,6 +126,7 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
   const [graphData, setGraphData] = useState(defaultGraphData);
   
   const [isWalkModalOpen, setIsWalkModalOpen] = useState(false);
+  const [showAllActions, setShowAllActions] = useState(false);
   const [walkDay, setWalkDay] = useState('Monday');
   const [walkSession, setWalkSession] = useState<WalkSessionSummary | null>(null);
   const [walkPoints, setWalkPoints] = useState<WalkPoint[]>([]);
@@ -132,6 +147,31 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
       name: day.name,
       carbon: Number(incomingMap.get(day.name) ?? day.carbon),
     }));
+  };
+
+  const parseActionPoints = (value: number | string) => {
+    if (typeof value === 'number') {
+      return value;
+    }
+    const parsed = Number(String(value).replace(/[^\d.-]/g, ''));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const formatActionPoints = (value: number | string) => {
+    const numericPoints = parseActionPoints(value);
+    const sign = numericPoints > 0 ? '+' : numericPoints < 0 ? '-' : '';
+    return `${sign}${Math.abs(numericPoints)}`;
+  };
+
+  const actionPointsClassName = (value: number | string) => {
+    const numericPoints = parseActionPoints(value);
+    if (numericPoints < 0) {
+      return 'text-red-400 bg-red-400/10';
+    }
+    if (numericPoints > 0) {
+      return 'text-emerald-400 bg-emerald-400/10';
+    }
+    return 'text-zinc-300 bg-zinc-300/10';
   };
 
   useEffect(() => {
@@ -178,7 +218,7 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
         const normalizedActions = Array.isArray(data.recentActions)
           ? data.recentActions.map((action) => ({
               ...action,
-              points: typeof action.points === 'number' ? `+${action.points}` : action.points,
+              points: typeof action.points === 'number' ? action.points : Number(action.points || 0),
             }))
           : [];
         setRecentActions(normalizedActions);
@@ -281,6 +321,7 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
             lat: position.coords.latitude,
             lng: position.coords.longitude,
             timestamp: new Date().toISOString(),
+            accuracyMeters: Number(position.coords.accuracy),
           });
         },
         (error) => reject(error),
@@ -314,13 +355,21 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
         body: JSON.stringify({ userId: user.id, point }),
       });
 
-      const payload = (await response.json()) as { message?: string };
+      const payload = (await response.json()) as WalkTrackResponse;
       if (!response.ok) {
         throw new Error(payload.message || 'Unable to record walk sample.');
       }
 
-      appendTrackedPoint(point);
-      setWalkStatus('Tracking verified walk session...');
+      if (typeof payload.trackedDistanceKm === 'number') {
+        setWalkEstimatedKm(Number(payload.trackedDistanceKm));
+      }
+
+      if (payload.accepted) {
+        appendTrackedPoint(point);
+        setWalkStatus('Tracking verified walk session...');
+      } else {
+        setWalkStatus('GPS drift ignored. Keep walking in open sky for accurate tracking.');
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to record walk sample.';
       setWalkError(message);
@@ -464,11 +513,11 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
       id: Date.now(),
       title,
       time: 'Just now',
-      points: `+${points}`,
+      points,
       type: 'user-logged'
     };
     
-    const updatedActions = [newAction, ...recentActions].slice(0, 5); 
+    const updatedActions = [newAction, ...recentActions].slice(0, 20); 
     setRecentActions(updatedActions);
     
     const newTotalPoints = totalPoints + points;
@@ -553,23 +602,72 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
         const response = await fetch(`${API_BASE}/api/actions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title, points, type: categoryId, userId: user.id }),
+          body: JSON.stringify({ title, amount, type: categoryId, userId: user.id }),
         });
 
         if (!response.ok) {
           const errorData = (await response.json()) as { message?: string };
           const errorMessage = errorData?.message || 'Unable to record action';
+
+          // Revert optimistic UI updates if points are rejected by server
+          setRecentActions(previousActions);
+          setTotalPoints(previousTotalPoints);
+          setWaterSaved(previousWaterSaved);
+          setWasteReduced(previousWasteReduced);
+          localStorage.setItem('ecoActions', JSON.stringify(previousActions));
+          localStorage.setItem('ecoPoints', previousTotalPoints.toString());
+          localStorage.setItem('ecoWaterSaved', previousWaterSaved.toString());
+          localStorage.setItem('ecoWasteReduced', previousWasteReduced.toString());
+
           setLogActionError(errorMessage);
           alert(`⚠️ Action Not Recorded\n\n${errorMessage}`);
+          return false;
         }
+
+        const actionData = (await response.json()) as { points?: number };
+        if (typeof actionData?.points === 'number') {
+          const serverPoints = actionData.points;
+          const adjustedTotalPoints = previousTotalPoints + serverPoints;
+          const adjustedActions = [
+            {
+              ...newAction,
+              points: serverPoints,
+            },
+            ...previousActions,
+          ].slice(0, 20);
+
+          setTotalPoints(adjustedTotalPoints);
+          setRecentActions(adjustedActions);
+          localStorage.setItem('ecoPoints', adjustedTotalPoints.toString());
+          localStorage.setItem('ecoActions', JSON.stringify(adjustedActions));
+        }
+
+        return true;
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Network error while recording action';
+        setRecentActions(previousActions);
+        setTotalPoints(previousTotalPoints);
+        setWaterSaved(previousWaterSaved);
+        setWasteReduced(previousWasteReduced);
+        localStorage.setItem('ecoActions', JSON.stringify(previousActions));
+        localStorage.setItem('ecoPoints', previousTotalPoints.toString());
+        localStorage.setItem('ecoWaterSaved', previousWaterSaved.toString());
+        localStorage.setItem('ecoWasteReduced', previousWasteReduced.toString());
         setLogActionError(errorMsg);
+        alert(`❌ Error\n\n${errorMsg}`);
+        return false;
       }
     };
 
-    void syncMetrics();
-    void syncAction();
+    const syncAll = async () => {
+      const actionSynced = await syncAction();
+      if (!actionSynced) {
+        return;
+      }
+      await syncMetrics();
+    };
+
+    void syncAll();
   };
 
   const handleWalkSessionAction = () => {
@@ -588,6 +686,7 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
   const rankImprovement = (resolvedCount * 2) + Math.floor(totalPoints / 50);
   const currentRank = Math.max(1, 15 - rankImprovement); 
   const rankTrend = Math.max(1, rankImprovement); 
+  const visibleActions = showAllActions ? recentActions : recentActions.slice(0, 5);
 
   return (
     <div className="relative flex-1 h-screen overflow-y-auto bg-[#050505] text-zinc-50 selection:bg-emerald-500/30">
@@ -764,7 +863,12 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
           >
             <div className="flex justify-between items-center mb-8">
               <h3 className="text-lg font-medium">Action Log</h3>
-              <button className="text-xs text-emerald-400 hover:text-emerald-300 transition-colors">View All</button>
+              <button
+                onClick={() => setShowAllActions((current) => !current)}
+                className="text-xs text-emerald-400 hover:text-emerald-300 transition-colors"
+              >
+                {showAllActions ? 'Show Recent' : 'View All'}
+              </button>
             </div>
             
             <div className="flex-1 relative">
@@ -774,7 +878,7 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
                 {recentActions.length === 0 ? (
                   <p className="text-zinc-500 text-sm ml-8">No actions logged yet.</p>
                 ) : (
-                  recentActions.map((action, i) => (
+                  visibleActions.map((action, i) => (
                     <motion.div 
                       initial={{ opacity: 0, x: 20 }}
                       animate={{ opacity: 1, x: 0 }}
@@ -792,8 +896,8 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
                         <p className="text-xs text-zinc-500 mt-1">{action.time}</p>
                       </div>
                       <div className="text-right">
-                        <span className="text-sm font-bold text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded-md">
-                          {action.points}
+                        <span className={`text-sm font-bold px-2 py-1 rounded-md ${actionPointsClassName(action.points)}`}>
+                          {formatActionPoints(action.points)}
                         </span>
                       </div>
                     </motion.div>
