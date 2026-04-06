@@ -1601,6 +1601,17 @@ async function startServer() {
       return res.json({ reply });
     } catch (error) {
       console.error('Gemini chat error:', error);
+      const statusCode =
+        error && typeof error === 'object' && 'status' in error && typeof (error as { status?: unknown }).status === 'number'
+          ? Number((error as { status: number }).status)
+          : 500;
+
+      if (statusCode === 429) {
+        return res.status(429).json({
+          message: 'AI quota exceeded for the current API key. Please retry later or use a key with available quota.',
+        });
+      }
+
       return res.status(500).json({ message: 'Failed to generate chatbot response.' });
     }
   });
