@@ -151,6 +151,44 @@ export function AuthorityPortal() {
     alert(`Ticket ${id} marked as Resolved! The reporter has been awarded 150 bonus Leaves.`);
   };
 
+  const handleRemoveReport = async (id: string) => {
+    let removedViaApi = false;
+
+    if (API_BASE) {
+      try {
+        const response = await fetch(`${API_BASE}/api/reports/${id}?role=${encodeURIComponent(requesterRole)}`, {
+          method: 'DELETE',
+        });
+
+        if (response.ok) {
+          const nextIssues = issues.filter((issue) => issue.id !== id);
+          setIssues(nextIssues);
+          localStorage.setItem('ecoSyncReports', JSON.stringify(nextIssues));
+          if (selectedIssue?.id === id) {
+            setSelectedIssue(null);
+          }
+          removedViaApi = true;
+        }
+      } catch {
+        // Fall back to local update.
+      }
+    }
+
+    if (!removedViaApi) {
+      const nextIssues = issues.filter((issue) => issue.id !== id);
+      setIssues(nextIssues);
+
+      const savedReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]');
+      const updatedSavedReports = savedReports.filter((report: any) => report.id !== id);
+      localStorage.setItem('ecoSyncReports', JSON.stringify(updatedSavedReports));
+      if (selectedIssue?.id === id) {
+        setSelectedIssue(null);
+      }
+    }
+
+    alert(`Ticket ${id} was removed by authority review.`);
+  };
+
   const openTicketsCount = issues.filter(i => i.status === 'Open').length;
   const resolvedTicketsCount = issues.filter(i => i.status === 'Resolved').length;
 
@@ -237,6 +275,12 @@ export function AuthorityPortal() {
                         Mark Resolved
                       </button>
                     )}
+                    <button
+                      onClick={() => handleRemoveReport(issue.id)}
+                      className="w-full py-1 mt-2 bg-red-500 hover:bg-red-600 text-white rounded text-xs font-bold transition-colors"
+                    >
+                      Remove Report
+                    </button>
                   </div>
                 </Popup>
               </Marker>
@@ -291,15 +335,26 @@ export function AuthorityPortal() {
                   <td className="p-4 text-zinc-500">{issue.reporter}</td>
                   <td className="p-4">
                     {issue.status !== 'Resolved' ? (
-                      <button 
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void handleMarkResolved(issue.id);
-                        }}
-                        className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-md transition-colors text-xs font-bold"
-                      >
-                        <CheckSquare size={14} /> Resolve
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleMarkResolved(issue.id);
+                          }}
+                          className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-md transition-colors text-xs font-bold"
+                        >
+                          <CheckSquare size={14} /> Resolve
+                        </button>
+                        <button
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleRemoveReport(issue.id);
+                          }}
+                          className="flex items-center gap-2 px-3 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-md transition-colors text-xs font-bold"
+                        >
+                          <X size={14} /> Remove
+                        </button>
+                      </div>
                     ) : (
                       <span className="text-xs text-zinc-600 font-bold uppercase tracking-wider">Closed</span>
                     )}

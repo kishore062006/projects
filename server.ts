@@ -1563,6 +1563,63 @@ async function startServer() {
     }
   });
 
+  app.delete('/api/reports/:id', async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const role = String(req.query.role || req.body?.role || '').toLowerCase();
+    if (role !== 'admin') {
+      return res.status(403).json({ message: 'Only leaders can remove reports.' });
+    }
+
+    try {
+      const removedReport = await mutateState((state) => {
+        const reportIndex = state.reports.findIndex((item) => item.id === id);
+        if (reportIndex === -1) {
+          throw new Error('REPORT_NOT_FOUND');
+        }
+
+        const report = state.reports[reportIndex];
+        const reports = state.reports.filter((item) => item.id !== id);
+        const reporterUserId = String(report.ownerUserId || '');
+        const dashboard = reporterUserId ? getOrCreateUserDashboard(state, reporterUserId) : null;
+
+        return {
+          nextState: {
+            ...state,
+            reports,
+            userDashboards:
+              reporterUserId && dashboard
+                ? {
+                    ...state.userDashboards,
+                    [reporterUserId]: {
+                      ...dashboard,
+                      actions: [
+                        {
+                          id: Date.now() + 3,
+                          title: `Authority removed ${report.type}`,
+                          time: 'Just now',
+                          points: 0,
+                          type: 'report-removed',
+                          userId: reporterUserId,
+                        },
+                        ...dashboard.actions,
+                      ],
+                    },
+                  }
+                : state.userDashboards,
+          },
+          result: report,
+        };
+      });
+
+      res.json(removedReport);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'REPORT_NOT_FOUND') {
+        return res.status(404).json({ message: 'Report not found.' });
+      }
+      handleStorageError(res, error);
+    }
+  });
+
   app.post('/api/redeem', async (req: Request, res: Response) => {
     const { rewardId } = req.body;
     if (!rewardId) {
