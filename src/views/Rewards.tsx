@@ -496,8 +496,18 @@ export function Rewards({ user }: RewardsProps) {
           <div className="mb-6 rounded-2xl border border-[#D4AF37]/25 bg-[#1A050C] p-4">
             <p className="text-xs uppercase tracking-widest text-white/60 mb-1">Selected Zone</p>
             <p className="text-white font-medium">{selectedZone.name}</p>
-            <p className={selectedZone.health === 'healthy' ? 'text-emerald-300 text-sm mt-1' : 'text-red-300 text-sm mt-1'}>
-              {selectedZone.health === 'healthy'
+            <p
+              className={
+                !selectedZone.adoptedByUserId
+                  ? 'text-zinc-300 text-sm mt-1'
+                  : selectedZone.health === 'healthy'
+                  ? 'text-emerald-300 text-sm mt-1'
+                  : 'text-red-300 text-sm mt-1'
+              }
+            >
+              {!selectedZone.adoptedByUserId
+                ? 'Status: Not adopted yet'
+                : selectedZone.health === 'healthy'
                 ? 'Status: Green (Healthy)'
                 : `Status: Red (Alert) - ${selectedZone.openIssueCount} open issues`}
             </p>
@@ -553,8 +563,20 @@ export function Rewards({ user }: RewardsProps) {
                   <div>
                     <p className="text-white font-medium">{zone.name}</p>
                     <p className="text-white/60 text-sm capitalize mt-1">{zone.type} • Radius {zone.radiusKm} km</p>
-                    <p className={zone.health === 'healthy' ? 'text-emerald-300 text-sm mt-2' : 'text-red-300 text-sm mt-2'}>
-                      {zone.health === 'healthy' ? 'Healthy zone' : `Alert: ${zone.openIssueCount} open issues`}
+                    <p
+                      className={
+                        !zone.adoptedByUserId
+                          ? 'text-zinc-300 text-sm mt-2'
+                          : zone.health === 'healthy'
+                          ? 'text-emerald-300 text-sm mt-2'
+                          : 'text-red-300 text-sm mt-2'
+                      }
+                    >
+                      {!zone.adoptedByUserId
+                        ? 'Not adopted yet'
+                        : zone.health === 'healthy'
+                        ? 'Healthy zone'
+                        : `Alert: ${zone.openIssueCount} open issues`}
                     </p>
                   </div>
                   <span className="text-white/80 text-sm">{zone.adoptionCost} Leaves</span>
