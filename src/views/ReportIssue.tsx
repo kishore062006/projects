@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { Camera, MapPin, Upload, AlertTriangle, Cpu, X } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
+import * as L from 'leaflet';
 import type { AuthUser } from '../App';
 import { API_BASE } from '../lib/api';
 
@@ -27,6 +29,77 @@ const fallbackDetailsByCategory: Record<(typeof AI_CATEGORIES)[number], string> 
     'The image suggests stress or damage in green infrastructure. Check structural condition, extent of impact, and immediate public safety concerns.',
 };
 
+const categoryPriorityMap: Record<(typeof AI_CATEGORIES)[number], 'Critical' | 'High' | 'Medium'> = {
+  'Water Leakage (SDG 6)': 'Critical',
+  'Polluted Water Body (SDG 6)': 'Critical',
+  'Illegal Dumping (SDG 11)': 'High',
+  'Damaged Green Infrastructure (SDG 13)': 'Medium',
+};
+
+const DEFAULT_COORDS: [number, number] = [40.7128, -74.0060];
+
+const parseLocationInput = (value: string): [number, number] | null => {
+  const parts = value.split(',').map((part) => part.trim());
+  if (parts.length !== 2) {
+    return null;
+  }
+
+  const parsePart = (part: string, axis: 'lat' | 'lng') => {
+    const numeric = Number.parseFloat(part.replace(/[^\d.-]/g, ''));
+    if (Number.isNaN(numeric)) {
+      return null;
+    }
+
+    if (/[sSwW]/.test(part)) {
+      return -Math.abs(numeric);
+    }
+    if (/[nNeE]/.test(part)) {
+      return Math.abs(numeric);
+    }
+    return numeric;
+  };
+
+  const lat = parsePart(parts[0], 'lat');
+  const lng = parsePart(parts[1], 'lng');
+  if (lat === null || lng === null) {
+    return null;
+  }
+
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    return null;
+  }
+
+  return [lat, lng];
+};
+
+const formatLocationDegrees = (lat: number, lng: number) => {
+  const latText = `${Math.abs(lat).toFixed(4)}° ${lat >= 0 ? 'N' : 'S'}`;
+  const lngText = `${Math.abs(lng).toFixed(4)}° ${lng >= 0 ? 'E' : 'W'}`;
+  return `${latText}, ${lngText}`;
+};
+
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
+type LocationPickerMarkerProps = {
+  position: [number, number];
+  onPick: (coords: [number, number]) => void;
+};
+
+function LocationPickerMarker({ position, onPick }: LocationPickerMarkerProps) {
+  useMapEvents({
+    click(event) {
+      onPick([event.latlng.lat, event.latlng.lng]);
+    },
+  });
+
+  return <Marker position={position} />;
+}
+
 type ReportIssueProps = {
   user: AuthUser | null;
 };
@@ -38,6 +111,8 @@ export function ReportIssue({ user }: ReportIssueProps) {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [category, setCategory] = useState("Water Leakage (SDG 6)");
   const [location, setLocation] = useState("40.7128° N, 74.0060° W");
+  const [mapCoords, setMapCoords] = useState<[number, number]>(DEFAULT_COORDS);
+  const [showMapPicker, setShowMapPicker] = useState(false);
   const [description, setDescription] = useState("");
   const [isFetchingGPS, setIsFetchingGPS] = useState(false);
   const [isAITagging, setIsAITagging] = useState(false);
@@ -54,6 +129,13 @@ export function ReportIssue({ user }: ReportIssueProps) {
       stopCamera();
     };
   }, []);
+
+  useEffect(() => {
+    const parsedCoords = parseLocationInput(location);
+    if (parsedCoords) {
+      setMapCoords(parsedCoords);
+    }
+  }, [location]);
 
   // START CAMERA - FIXED FOR LAPTOPS!
   const startCamera = async () => {
@@ -174,6 +256,7 @@ export function ReportIssue({ user }: ReportIssueProps) {
           const formattedLat = `${Math.abs(Number(lat))}° ${Number(lat) >= 0 ? 'N' : 'S'}`;
           const formattedLng = `${Math.abs(Number(lng))}° ${Number(lng) >= 0 ? 'E' : 'W'}`;
           setLocation(`${formattedLat}, ${formattedLng}`);
+          setMapCoords([Number(lat), Number(lng)]);
           setIsFetchingGPS(false);
         },
         (error) => {
@@ -208,7 +291,7 @@ export function ReportIssue({ user }: ReportIssueProps) {
     
     const reportData = {
       type: category.split(' (')[0],
-      priority: category.includes('SDG 6') ? 'Critical' : 'High',
+      priority: categoryPriorityMap[category as (typeof AI_CATEGORIES)[number]] || 'High',
       reporter: reporterName,
       location,
       description,
@@ -451,12 +534,19 @@ export function ReportIssue({ user }: ReportIssueProps) {
                     <MapPin size={20} className="absolute left-5 top-1/2 -translate-y-1/2 text-emerald-500" />
                     <input 
                       type="text" 
-                      placeholder="Fetching GPS coordinates..." 
+                      placeholder="40.7128, -74.0060 or 40.7128° N, 74.0060° W" 
                       className="w-full bg-black/20 border border-white/10 rounded-2xl pl-14 pr-5 py-4 text-white focus:outline-none focus:border-emerald-500/50 focus:bg-black/40 transition-all shadow-inner"
                       value={location}
                       onChange={(e) => setLocation(e.target.value)}
                     />
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowMapPicker((prev) => !prev)}
+                    className="px-4 py-4 bg-white/[0.05] hover:bg-white/[0.1] border border-white/10 rounded-2xl text-sm font-medium transition-colors shadow-inner"
+                  >
+                    {showMapPicker ? 'Hide Map' : 'Pick on Map'}
+                  </button>
                   <button 
                     type="button" 
                     onClick={handleGetLocation}
@@ -466,6 +556,30 @@ export function ReportIssue({ user }: ReportIssueProps) {
                     {isFetchingGPS ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : 'Update'}
                   </button>
                 </div>
+                {showMapPicker && (
+                  <div className="mt-4 border border-white/10 rounded-2xl overflow-hidden bg-black/20">
+                    <MapContainer
+                      center={mapCoords}
+                      zoom={13}
+                      style={{ height: '260px', width: '100%' }}
+                    >
+                      <TileLayer
+                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                      />
+                      <LocationPickerMarker
+                        position={mapCoords}
+                        onPick={(coords) => {
+                          setMapCoords(coords);
+                          setLocation(formatLocationDegrees(coords[0], coords[1]));
+                        }}
+                      />
+                    </MapContainer>
+                    <div className="px-4 py-3 text-xs text-zinc-400 border-t border-white/10">
+                      Click on the map to set report location.
+                    </div>
+                  </div>
+                )}
               </motion.div>
 
               {/* Description */}

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { MapPin, AlertCircle, CheckCircle, Clock, Filter, CheckSquare, List } from 'lucide-react';
+import { MapPin, AlertCircle, CheckCircle, Clock, Filter, CheckSquare, List, X } from 'lucide-react';
 // ADDED: Leaflet Map Imports
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import * as L from 'leaflet';
@@ -16,7 +16,18 @@ L.Icon.Default.mergeOptions({
 // ADDED: Helper to parse coordinate string "40.7128° N, 74.0060° W" to [Lat, Lng] array
 const parseCoords = (coordStr: string): [number, number] => {
   try {
-    if (!coordStr || !coordStr.includes('°')) return [40.7128, -74.0060]; // Default fallback
+    if (!coordStr) return [40.7128, -74.0060];
+
+    const decimalParts = coordStr.split(',').map((part) => part.trim());
+    if (decimalParts.length === 2 && !coordStr.includes('°')) {
+      const lat = Number.parseFloat(decimalParts[0]);
+      const lng = Number.parseFloat(decimalParts[1]);
+      if (!Number.isNaN(lat) && !Number.isNaN(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+        return [lat, lng];
+      }
+    }
+
+    if (!coordStr.includes('°')) return [40.7128, -74.0060]; // Default fallback
     const parts = coordStr.split(',');
     let lat = parseFloat(parts[0].replace(/[^\d.-]/g, ''));
     let lng = parseFloat(parts[1].replace(/[^\d.-]/g, ''));
@@ -28,8 +39,35 @@ const parseCoords = (coordStr: string): [number, number] => {
   }
 };
 
+const getPriorityFromIssue = (issue: any): 'Critical' | 'High' | 'Medium' | 'Low' => {
+  const explicitPriority = String(issue?.priority || '').trim();
+  if (explicitPriority === 'Critical' || explicitPriority === 'High' || explicitPriority === 'Medium' || explicitPriority === 'Low') {
+    return explicitPriority;
+  }
+
+  const issueType = String(issue?.type || '').toLowerCase();
+  if (issueType.includes('water leakage') || issueType.includes('polluted water')) {
+    return 'Critical';
+  }
+  if (issueType.includes('illegal dumping')) {
+    return 'High';
+  }
+  if (issueType.includes('green infrastructure')) {
+    return 'Medium';
+  }
+  return 'Low';
+};
+
+const getPriorityBadgeClass = (priority: string) => {
+  if (priority === 'Critical') return 'bg-red-500/20 text-red-400';
+  if (priority === 'High') return 'bg-orange-500/20 text-orange-400';
+  if (priority === 'Medium') return 'bg-yellow-500/20 text-yellow-400';
+  return 'bg-blue-500/20 text-blue-400';
+};
+
 export function AuthorityPortal() {
   const [issues, setIssues] = useState<any[]>([]);
+  const [selectedIssue, setSelectedIssue] = useState<any | null>(null);
   // ADDED: View mode state
   const [viewMode, setViewMode] = useState<'table' | 'map'>('table');
 
@@ -41,8 +79,12 @@ export function AuthorityPortal() {
           if (response.ok) {
             const data = await response.json();
             if (Array.isArray(data)) {
-              setIssues(data);
-              localStorage.setItem('ecoSyncReports', JSON.stringify(data));
+              const normalizedData = data.map((issue) => ({
+                ...issue,
+                priority: getPriorityFromIssue(issue),
+              }));
+              setIssues(normalizedData);
+              localStorage.setItem('ecoSyncReports', JSON.stringify(normalizedData));
               return;
             }
           }
@@ -52,7 +94,11 @@ export function AuthorityPortal() {
       }
 
       const savedReports = JSON.parse(localStorage.getItem('ecoSyncReports') || '[]');
-      setIssues(savedReports);
+      const normalizedReports = savedReports.map((issue: any) => ({
+        ...issue,
+        priority: getPriorityFromIssue(issue),
+      }));
+      setIssues(normalizedReports);
     };
 
     void loadIssues();
@@ -163,16 +209,23 @@ export function AuthorityPortal() {
                   <div className="p-1 font-sans">
                     <h3 className="font-bold text-sm mb-1">{issue.type}</h3>
                     <p className="text-xs text-gray-600 mb-2">Reported by: {issue.reporter}</p>
+                    <p className="text-xs text-gray-600 mb-2">Priority: {getPriorityFromIssue(issue)}</p>
                     <span className={`px-2 py-1 rounded text-xs font-bold text-white ${
                       issue.status === 'Open' ? 'bg-red-500' :
                       issue.status === 'In Progress' ? 'bg-amber-500' : 'bg-emerald-500'
                     }`}>
                       {issue.status}
                     </span>
+                    <button
+                      onClick={() => setSelectedIssue(issue)}
+                      className="w-full py-1 mt-2 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-bold transition-colors"
+                    >
+                      View Details
+                    </button>
                     {issue.status !== 'Resolved' && (
                       <button 
                         onClick={() => handleMarkResolved(issue.id)}
-                        className="w-full py-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded text-xs font-bold transition-colors"
+                        className="w-full py-1 mt-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded text-xs font-bold transition-colors"
                       >
                         Mark Resolved
                       </button>
@@ -200,7 +253,11 @@ export function AuthorityPortal() {
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
               {issues.map((issue) => (
-                <tr key={issue.id} className="hover:bg-zinc-800/30 transition-colors cursor-pointer group">
+                <tr
+                  key={issue.id}
+                  onClick={() => setSelectedIssue(issue)}
+                  className="hover:bg-zinc-800/30 transition-colors cursor-pointer group"
+                >
                   <td className="p-4 text-white font-medium">{issue.id}</td>
                   <td className="p-4">{issue.type}</td>
                   <td className="p-4 flex items-center gap-2 truncate max-w-[200px]">
@@ -208,13 +265,8 @@ export function AuthorityPortal() {
                     {issue.location}
                   </td>
                   <td className="p-4">
-                    <span className={`px-2 py-1 rounded text-xs font-bold whitespace-nowrap ${
-                      issue.priority === 'Critical' ? 'bg-red-500/20 text-red-400' :
-                      issue.priority === 'High' ? 'bg-orange-500/20 text-orange-400' :
-                      issue.priority === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' :
-                      'bg-blue-500/20 text-blue-400'
-                    }`}>
-                      {issue.priority}
+                    <span className={`px-2 py-1 rounded text-xs font-bold whitespace-nowrap ${getPriorityBadgeClass(getPriorityFromIssue(issue))}`}>
+                      {getPriorityFromIssue(issue)}
                     </span>
                   </td>
                   <td className="p-4">
@@ -233,7 +285,10 @@ export function AuthorityPortal() {
                   <td className="p-4">
                     {issue.status !== 'Resolved' ? (
                       <button 
-                        onClick={() => handleMarkResolved(issue.id)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleMarkResolved(issue.id);
+                        }}
                         className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-md transition-colors text-xs font-bold"
                       >
                         <CheckSquare size={14} /> Resolve
@@ -246,6 +301,59 @@ export function AuthorityPortal() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {selectedIssue && (
+        <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-3xl rounded-2xl border border-zinc-700 bg-zinc-900 shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+              <div>
+                <h3 className="text-lg font-bold text-white">{selectedIssue.type}</h3>
+                <p className="text-xs text-zinc-400">Ticket: {selectedIssue.id} • Reported by {selectedIssue.reporter}</p>
+              </div>
+              <button
+                onClick={() => setSelectedIssue(null)}
+                className="p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-0">
+              <div className="p-5 border-b md:border-b-0 md:border-r border-zinc-800">
+                <p className="text-xs uppercase tracking-wider text-zinc-500 mb-2">Uploaded Evidence</p>
+                {selectedIssue.image ? (
+                  <img
+                    src={selectedIssue.image}
+                    alt="Reported issue evidence"
+                    className="w-full h-[320px] object-cover rounded-xl border border-zinc-700"
+                  />
+                ) : (
+                  <div className="w-full h-[320px] rounded-xl border border-dashed border-zinc-700 text-zinc-500 flex items-center justify-center text-sm">
+                    No image uploaded for this report.
+                  </div>
+                )}
+              </div>
+
+              <div className="p-5 space-y-4">
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-zinc-500 mb-1">Priority</p>
+                  <span className={`px-2 py-1 rounded text-xs font-bold ${getPriorityBadgeClass(getPriorityFromIssue(selectedIssue))}`}>
+                    {getPriorityFromIssue(selectedIssue)}
+                  </span>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-zinc-500 mb-1">Location</p>
+                  <p className="text-sm text-zinc-200">{selectedIssue.location}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-zinc-500 mb-1">Description</p>
+                  <p className="text-sm text-zinc-200 whitespace-pre-wrap">{selectedIssue.description || 'No details provided.'}</p>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
