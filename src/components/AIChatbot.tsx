@@ -61,10 +61,29 @@ export function AIChatbot({ user }: AIChatbotProps) {
       });
 
       const payload = await response.json().catch(() => ({}));
+      const backendMessage = typeof payload?.message === 'string' ? payload.message.trim() : '';
+
+      if (!response.ok) {
+        const statusHint = response.status ? ` (HTTP ${response.status})` : '';
+        const errorMessage =
+          backendMessage ||
+          `AI service is temporarily unavailable${statusHint}. Please retry in a few seconds.`;
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: makeMessageId(),
+            role: 'assistant',
+            content: errorMessage,
+          },
+        ]);
+        return;
+      }
+
       const replyText =
         typeof payload?.reply === 'string' && payload.reply.trim()
           ? payload.reply.trim()
-          : 'I could not generate a response right now. Please try again in a moment.';
+          : 'AI returned an empty response. Please try again.';
 
       setMessages((prev) => [
         ...prev,
