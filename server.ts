@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js';
-import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import type { Request, Response } from 'express';
 
@@ -534,8 +533,6 @@ async function startServer() {
   const crypto = await import('crypto');
   const hashPassword = (password: string) => crypto.createHash('sha256').update(password).digest('hex');
   const groqApiKey = process.env.GROQ_API_KEY?.trim() || '';
-  const geminiApiKey = process.env.GEMINI_API_KEY?.trim() || '';
-  const geminiClient = geminiApiKey ? new GoogleGenAI({ apiKey: geminiApiKey }) : null;
 
   const readStateSnapshot = async (): Promise<StateRow> => {
     const { data, error } = await supabase.from('app_state').select('state,updated_at').eq('id', STATE_ROW_ID).maybeSingle();
@@ -1554,8 +1551,8 @@ async function startServer() {
       return res.status(400).json({ message: 'Invalid image data format. Use a base64 data URL.' });
     }
 
-    if (!groqApiKey && !geminiClient) {
-      return res.status(503).json({ message: 'No AI provider key configured on the backend.' });
+    if (!groqApiKey) {
+      return res.status(503).json({ message: 'GROQ_API_KEY is not configured on the backend.' });
     }
 
     const prompt = [
@@ -1572,28 +1569,41 @@ async function startServer() {
     ].join(' ');
 
     try {
-      const response = await geminiClient.models.generateContent({
-        model: 'gemini-2.0-flash',
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              { text: prompt },
-              {
-                inlineData: {
-                  mimeType: imagePayload.mimeType,
-                  data: imagePayload.base64Data,
-                },
-              },
-            ],
-          },
-        ],
+      const imageDataUrlForModel = `data:${imagePayload.mimeType};base64,${imagePayload.base64Data}`;
+      const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${groqApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'llama-3.2-11b-vision-preview',
+          temperature: 0.2,
+          max_tokens: 400,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: prompt },
+                { type: 'image_url', image_url: { url: imageDataUrlForModel } },
+              ],
+            },
+          ],
+        }),
       });
 
-      const modelOutput = response.text?.trim() || '{}';
+      if (!groqResponse.ok) {
+        const errorText = await groqResponse.text();
+        throw new Error(`Groq analysis request failed: ${groqResponse.status} ${errorText}`);
+      }
+
+      const groqPayload = (await groqResponse.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      const modelOutput = String(groqPayload?.choices?.[0]?.message?.content || '').trim();
       const parsed = parseModelJson(modelOutput);
       if (!parsed) {
-        return res.status(502).json({ message: 'Gemini returned an invalid response format.' });
+        throw new Error('Groq returned an invalid analysis response format.');
       }
 
       const rawCategory = String(parsed.category || '').trim();
@@ -1608,8 +1618,13 @@ async function startServer() {
 
       res.json({ category, description, additionalDetails });
     } catch (error) {
-      console.error('Gemini analysis error:', error);
-      res.status(500).json({ message: 'Failed to analyze image with Gemini.' });
+      console.error('Groq analysis error:', error);
+      const category = mapModelCategory('', hintCategory, '', '');
+      res.json({
+        category,
+        description: `Potential ${category.split('(')[0].trim()} identified. Please verify on-site.`,
+        additionalDetails: 'AI image analysis is temporarily unavailable. A safe fallback category was applied.',
+      });
     }
   });
 
@@ -1625,8 +1640,8 @@ async function startServer() {
       return res.status(400).json({ message: 'message is required.' });
     }
 
-    if (!geminiClient) {
-      return res.status(503).json({ message: 'Gemini API key is not configured on the backend.' });
+    if (!groqApiKey) {
+      return res.status(503).json({ message: 'GROQ_API_KEY is not configured on the backend.' });
     }
 
     const safeHistory = Array.isArray(history)
@@ -1651,72 +1666,43 @@ async function startServer() {
       `Current user: ${userName} (${userRole}).`,
     ].join(' ');
 
-    const historyText = safeHistory
-      .map((entry) => `${entry.role}: ${entry.content}`)
-      .join('\n');
-
-    const prompt = [
-      contextBlock,
-      historyText ? `Conversation history:\n${historyText}` : '',
-      `User: ${normalizedMessage}`,
-      'Assistant:',
-    ]
-      .filter(Boolean)
-      .join('\n\n');
-
     try {
-      if (groqApiKey) {
-        const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${groqApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'llama-3.1-8b-instant',
-            temperature: 0.4,
-            max_tokens: 350,
-            messages: [
-              { role: 'system', content: contextBlock },
-              ...safeHistory.map((entry) => ({
-                role: entry.role === 'User' ? 'user' : 'assistant',
-                content: entry.content,
-              })),
-              { role: 'user', content: normalizedMessage },
-            ],
-          }),
-        });
-
-        if (!groqResponse.ok) {
-          const errorText = await groqResponse.text();
-          throw new Error(`Groq request failed: ${groqResponse.status} ${errorText}`);
-        }
-
-        const groqPayload = (await groqResponse.json()) as {
-          choices?: Array<{ message?: { content?: string } }>;
-        };
-
-        const groqReply = String(groqPayload?.choices?.[0]?.message?.content || '').trim();
-        if (groqReply) {
-          return res.json({ reply: groqReply, provider: 'groq' });
-        }
-      }
-
-      if (!geminiClient) {
-        return res.status(502).json({ message: 'Groq returned an empty response and Gemini is unavailable.' });
-      }
-
-      const response = await geminiClient.models.generateContent({
-        model: 'gemini-2.0-flash',
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${groqApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'llama-3.1-8b-instant',
+          temperature: 0.4,
+          max_tokens: 350,
+          messages: [
+            { role: 'system', content: contextBlock },
+            ...safeHistory.map((entry) => ({
+              role: entry.role === 'User' ? 'user' : 'assistant',
+              content: entry.content,
+            })),
+            { role: 'user', content: normalizedMessage },
+          ],
+        }),
       });
 
-      const reply = (response.text || '').trim();
-      if (!reply) {
-        return res.status(502).json({ message: 'AI returned an empty response.' });
+      if (!groqResponse.ok) {
+        const errorText = await groqResponse.text();
+        return res.status(groqResponse.status).json({ message: `Groq request failed: ${errorText}` });
       }
 
-      res.json({ reply, provider: 'gemini' });
+      const groqPayload = (await groqResponse.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+
+      const groqReply = String(groqPayload?.choices?.[0]?.message?.content || '').trim();
+      if (!groqReply) {
+        return res.status(502).json({ message: 'Groq returned an empty response.' });
+      }
+
+      res.json({ reply: groqReply, provider: 'groq' });
     } catch (error) {
       console.error('Chatbot generation error:', error);
       res.status(500).json({ message: 'Failed to generate chatbot response.' });
