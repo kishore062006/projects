@@ -86,7 +86,7 @@ export function LearnModules() {
         <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1611273426858-450d8e3c9fce?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center opacity-15 grayscale"></div>
         <div className="absolute inset-0 bg-gradient-to-b from-zinc-950/50 via-zinc-950/80 to-zinc-950"></div>
         
-        <div className="relative z-10 max-w-4xl mx-auto px-8 text-center pl-[280px] md:pl-[320px]">
+        <div className="relative z-10 max-w-4xl mx-auto px-4 md:px-8 text-center pl-4 md:pl-[320px]">
           <motion.h1 
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
@@ -107,7 +107,7 @@ export function LearnModules() {
       </div>
 
       {/* Modules List */}
-      <div className="max-w-6xl mx-auto px-8 py-24 space-y-32 pl-[280px] md:pl-[320px]">
+      <div className="max-w-6xl mx-auto px-4 md:px-8 py-24 space-y-32 pl-4 md:pl-[320px]">
         {modules.map((module) => (
           <ModuleSection
             key={module.number}

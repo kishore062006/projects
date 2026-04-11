@@ -245,7 +245,7 @@ export function AuthorityPortal() {
   const resolvedTicketsCount = issues.filter(i => i.status === 'Resolved').length;
 
   return (
-    <div className="flex-1 h-screen overflow-y-auto bg-[#0a0a0a] text-zinc-300 p-8 pl-[300px] md:pl-[320px] font-mono">
+    <div className="flex-1 min-h-screen md:h-screen overflow-y-auto bg-[#0a0a0a] text-zinc-300 p-4 md:p-8 pl-4 md:pl-[320px] font-mono">
       <header className="mb-8 flex justify-between items-end border-b border-zinc-800 pb-6">
         <div>
           <h2 className="text-2xl font-bold text-white flex items-center gap-3">

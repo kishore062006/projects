@@ -34,7 +34,7 @@ const helplineCards = [
 
 export function Helplines() {
   return (
-    <div className="relative flex-1 h-screen overflow-y-auto bg-[#050505] text-white p-8 md:p-12 pl-[300px] md:pl-[320px]">
+    <div className="relative flex-1 min-h-screen md:h-screen overflow-y-auto bg-[#050505] text-white p-4 md:p-12 pl-4 md:pl-[320px]">
       <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
         <div className="absolute top-[-10%] right-[-8%] h-[45vw] w-[45vw] rounded-full bg-rose-600/10 blur-[110px]" />
         <div className="absolute bottom-[-15%] left-[8%] h-[55vw] w-[55vw] rounded-full bg-emerald-600/10 blur-[120px]" />

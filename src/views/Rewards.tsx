@@ -351,7 +351,7 @@ export function Rewards({ user }: RewardsProps) {
   };
 
   return (
-    <div className="flex-1 h-screen overflow-y-auto bg-[#2A0813] text-white p-8 md:p-12 pl-[300px] md:pl-[320px]">
+    <div className="flex-1 min-h-screen md:h-screen overflow-y-auto bg-[#2A0813] text-white p-4 md:p-12 pl-4 md:pl-[320px]">
       <motion.header 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}

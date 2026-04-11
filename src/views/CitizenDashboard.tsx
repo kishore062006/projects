@@ -809,7 +809,7 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
         <div className="absolute top-[40%] -right-[10%] w-[50vw] h-[50vw] rounded-full bg-cyan-600/10 blur-[120px]" />
       </div>
 
-      <div className="relative z-10 max-w-7xl mx-auto p-8 md:p-12 pl-[300px] md:pl-[320px]">
+      <div className="relative z-10 max-w-7xl mx-auto p-4 md:p-12 pl-4 md:pl-[320px]">
         <motion.header 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
