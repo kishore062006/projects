@@ -84,6 +84,37 @@ const formatLocationDegrees = (lat: number, lng: number) => {
   return `${latText}, ${lngText}`;
 };
 
+const normalizeImageForAI = async (dataUrl: string): Promise<string> => {
+  try {
+    const image = new Image();
+    image.src = dataUrl;
+
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('IMAGE_LOAD_FAILED'));
+    });
+
+    const maxDimension = 1280;
+    const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
+    const width = Math.max(1, Math.round(image.width * scale));
+    const height = Math.max(1, Math.round(image.height * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+
+    if (!context) {
+      return dataUrl;
+    }
+
+    context.drawImage(image, 0, 0, width, height);
+    return canvas.toDataURL('image/jpeg', 0.85);
+  } catch {
+    return dataUrl;
+  }
+};
+
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
@@ -189,11 +220,14 @@ export function ReportIssue({ user }: ReportIssueProps) {
         ctx.translate(canvas.width, 0);
         ctx.scale(-1, 1);
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
+
         const dataUrl = canvas.toDataURL('image/jpeg');
-        setImagePreview(dataUrl);
+        void (async () => {
+          const normalizedImage = await normalizeImageForAI(dataUrl);
+          setImagePreview(normalizedImage);
+          void triggerAITagging(normalizedImage);
+        })();
         stopCamera();
-        void triggerAITagging(dataUrl);
       }
     }
   };
@@ -287,10 +321,11 @@ export function ReportIssue({ user }: ReportIssueProps) {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => {
+      reader.onloadend = async () => {
         const nextPreview = reader.result as string;
-        setImagePreview(nextPreview);
-        void triggerAITagging(nextPreview);
+        const normalizedImage = await normalizeImageForAI(nextPreview);
+        setImagePreview(normalizedImage);
+        void triggerAITagging(normalizedImage);
       };
       reader.readAsDataURL(file);
     }
