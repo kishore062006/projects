@@ -8,6 +8,7 @@ import { ReportIssue } from './views/ReportIssue';
 import { AuthPage } from './views/AuthPage';
 import { Helplines } from './views/Helplines';
 import { About } from './views/About';
+import { AIChatbot } from './components/AIChatbot';
 
 export type AuthUser = {
   id: string;
@@ -80,6 +81,7 @@ export default function App() {
       <div className="flex-1 w-full h-full relative">
         {renderView()}
       </div>
+      <AIChatbot user={user} />
     </div>
   );
 }

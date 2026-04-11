@@ -533,6 +533,7 @@ async function startServer() {
 
   const crypto = await import('crypto');
   const hashPassword = (password: string) => crypto.createHash('sha256').update(password).digest('hex');
+  const groqApiKey = process.env.GROQ_API_KEY?.trim() || '';
   const geminiApiKey = process.env.GEMINI_API_KEY?.trim() || '';
   const geminiClient = geminiApiKey ? new GoogleGenAI({ apiKey: geminiApiKey }) : null;
 
@@ -1553,8 +1554,8 @@ async function startServer() {
       return res.status(400).json({ message: 'Invalid image data format. Use a base64 data URL.' });
     }
 
-    if (!geminiClient) {
-      return res.status(503).json({ message: 'Gemini API key is not configured on the backend.' });
+    if (!groqApiKey && !geminiClient) {
+      return res.status(503).json({ message: 'No AI provider key configured on the backend.' });
     }
 
     const prompt = [
@@ -1609,6 +1610,116 @@ async function startServer() {
     } catch (error) {
       console.error('Gemini analysis error:', error);
       res.status(500).json({ message: 'Failed to analyze image with Gemini.' });
+    }
+  });
+
+  app.post('/api/chatbot', async (req: Request, res: Response) => {
+    const { message, history, userContext } = req.body as {
+      message?: string;
+      history?: Array<{ role?: string; content?: string }>;
+      userContext?: { name?: string; role?: string };
+    };
+
+    const normalizedMessage = String(message || '').trim();
+    if (!normalizedMessage) {
+      return res.status(400).json({ message: 'message is required.' });
+    }
+
+    if (!geminiClient) {
+      return res.status(503).json({ message: 'Gemini API key is not configured on the backend.' });
+    }
+
+    const safeHistory = Array.isArray(history)
+      ? history
+          .slice(-8)
+          .map((entry) => ({
+            role: String(entry?.role || '').toLowerCase() === 'user' ? 'User' : 'Assistant',
+            content: String(entry?.content || '').slice(0, 1200),
+          }))
+          .filter((entry) => entry.content.trim().length > 0)
+      : [];
+
+    const userName = String(userContext?.name || 'Citizen').trim();
+    const userRole = String(userContext?.role || 'user').trim();
+
+    const contextBlock = [
+      'You are EcoSync AI, an assistant for a civic issue reporting platform.',
+      'Help users with reporting issues, report statuses, authority workflow, rewards, learning modules, and dashboard usage.',
+      'Keep responses practical, concise, and action-oriented.',
+      'If asked for unavailable data, clearly say you do not have live access to that specific account detail.',
+      'Never claim to have taken backend actions directly.',
+      `Current user: ${userName} (${userRole}).`,
+    ].join(' ');
+
+    const historyText = safeHistory
+      .map((entry) => `${entry.role}: ${entry.content}`)
+      .join('\n');
+
+    const prompt = [
+      contextBlock,
+      historyText ? `Conversation history:\n${historyText}` : '',
+      `User: ${normalizedMessage}`,
+      'Assistant:',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    try {
+      if (groqApiKey) {
+        const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${groqApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'llama-3.1-8b-instant',
+            temperature: 0.4,
+            max_tokens: 350,
+            messages: [
+              { role: 'system', content: contextBlock },
+              ...safeHistory.map((entry) => ({
+                role: entry.role === 'User' ? 'user' : 'assistant',
+                content: entry.content,
+              })),
+              { role: 'user', content: normalizedMessage },
+            ],
+          }),
+        });
+
+        if (!groqResponse.ok) {
+          const errorText = await groqResponse.text();
+          throw new Error(`Groq request failed: ${groqResponse.status} ${errorText}`);
+        }
+
+        const groqPayload = (await groqResponse.json()) as {
+          choices?: Array<{ message?: { content?: string } }>;
+        };
+
+        const groqReply = String(groqPayload?.choices?.[0]?.message?.content || '').trim();
+        if (groqReply) {
+          return res.json({ reply: groqReply, provider: 'groq' });
+        }
+      }
+
+      if (!geminiClient) {
+        return res.status(502).json({ message: 'Groq returned an empty response and Gemini is unavailable.' });
+      }
+
+      const response = await geminiClient.models.generateContent({
+        model: 'gemini-2.0-flash',
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      });
+
+      const reply = (response.text || '').trim();
+      if (!reply) {
+        return res.status(502).json({ message: 'AI returned an empty response.' });
+      }
+
+      res.json({ reply, provider: 'gemini' });
+    } catch (error) {
+      console.error('Chatbot generation error:', error);
+      res.status(500).json({ message: 'Failed to generate chatbot response.' });
     }
   });
 
