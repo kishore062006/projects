@@ -189,6 +189,19 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
     return 'text-zinc-300 bg-zinc-300/10';
   };
 
+  const formatReportIssuedAt = (report: UserReportItem) => {
+    const rawIssuedAt = String(report.timestamp || '').trim();
+    if (rawIssuedAt) {
+      const parsed = new Date(rawIssuedAt);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toLocaleString();
+      }
+    }
+
+    const fallbackTime = String(report.time || '').trim();
+    return fallbackTime || 'Just now';
+  };
+
   useEffect(() => {
     const savedActions = JSON.parse(localStorage.getItem('ecoActions') || 'null');
     if (savedActions) setRecentActions(savedActions);
@@ -1092,7 +1105,7 @@ export function CitizenDashboard({ user }: CitizenDashboardProps) {
                         </span>
                       </div>
                       <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400">
-                        <span className="rounded-full border border-white/10 px-3 py-1">{report.time || 'Recently submitted'}</span>
+                        <span className="rounded-full border border-white/10 px-3 py-1">Issued: {formatReportIssuedAt(report)}</span>
                         {report.priority && <span className="rounded-full border border-white/10 px-3 py-1">Priority: {report.priority}</span>}
                       </div>
                     </div>

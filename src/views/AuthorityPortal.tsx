@@ -66,6 +66,19 @@ const getPriorityBadgeClass = (priority: string) => {
   return 'bg-blue-500/20 text-blue-400';
 };
 
+const formatIssueIssuedAt = (issue: any) => {
+  const rawIssuedAt = String(issue?.timestamp || issue?.createdAt || '').trim();
+  if (rawIssuedAt) {
+    const parsed = new Date(rawIssuedAt);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toLocaleString();
+    }
+  }
+
+  const fallbackTime = String(issue?.time || '').trim();
+  return fallbackTime || 'Just now';
+};
+
 export function AuthorityPortal() {
   const currentUser = JSON.parse(localStorage.getItem('ecoSyncUser') || 'null') as { id?: string; role?: string } | null;
   const requesterId = String(currentUser?.id || '');
@@ -304,6 +317,7 @@ export function AuthorityPortal() {
                   <div className="p-1 font-sans">
                     <h3 className="font-bold text-sm mb-1">{issue.type}</h3>
                     <p className="text-xs text-gray-600 mb-2">Reported by: {issue.reporter}</p>
+                    <p className="text-xs text-gray-600 mb-2">Issued at: {formatIssueIssuedAt(issue)}</p>
                     <p className="text-xs text-gray-600 mb-2">Priority: {getPriorityFromIssue(issue)}</p>
                     <span className={`px-2 py-1 rounded text-xs font-bold text-white ${
                       issue.status === 'Open' ? 'bg-red-500' :
@@ -349,6 +363,7 @@ export function AuthorityPortal() {
                 <th className="p-4 font-medium">Priority</th>
                 <th className="p-4 font-medium">Status</th>
                 <th className="p-4 font-medium">Reported By</th>
+                <th className="p-4 font-medium">Issued At</th>
                 <th className="p-4 font-medium">Action</th>
               </tr>
             </thead>
@@ -383,6 +398,7 @@ export function AuthorityPortal() {
                     </div>
                   </td>
                   <td className="p-4 text-zinc-500">{issue.reporter}</td>
+                  <td className="p-4 text-zinc-400 whitespace-nowrap">{formatIssueIssuedAt(issue)}</td>
                   <td className="p-4">
                     {issue.status !== 'Resolved' ? (
                       <div className="flex items-center gap-2">
@@ -422,7 +438,7 @@ export function AuthorityPortal() {
             <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
               <div>
                 <h3 className="text-lg font-bold text-white">{selectedIssue.type}</h3>
-                <p className="text-xs text-zinc-400">Ticket: {selectedIssue.id} • Reported by {selectedIssue.reporter}</p>
+                <p className="text-xs text-zinc-400">Ticket: {selectedIssue.id} • Reported by {selectedIssue.reporter} • Issued at {formatIssueIssuedAt(selectedIssue)}</p>
               </div>
               <button
                 onClick={() => setSelectedIssue(null)}
